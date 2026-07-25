@@ -1,0 +1,350 @@
+# Datlor — Identity + Core Messaging Platform
+
+Two sprints implemented against `SD_PROJ.pdf`:
+
+**Sprint 1 — identity-service** (auth foundation)
+
+| # | Item |
+|---|------|
+| 1 | Design & migrate core DB schema (`users`, `profiles`, `refresh_tokens`) |
+| 2 | US-01 — User registration (email + password) |
+| 3 | US-02 — User login with email/password |
+| 4 | JWT access/refresh token flow |
+
+**Sprint 2 — core-service** (real-time channels)
+
+| # | Item |
+|---|------|
+| 1 | Design & migrate channel schema (`channels`, `channel_members`, `channel_topics`) |
+| 2 | US-09 — Create channel + migrate messaging schema (`messages`, `search_outbox`) |
+| 3 | US-04 — Send message in a public channel |
+| 4 | US-05 — View channel messages in real time |
+| 5 | US-10 — Channel settings screen (member list & roles) |
+| 6 | US-11 — Assign channel member roles (owner/manager/moderator/member) |
+| 7 | US-12 — Block/restrict a channel member |
+| 8 | US-13 — Delete channel |
+
+**Sprint 3 — topic-aware messaging** (messages MAY belong to a channel topic)
+
+- `messages.topic_id` (nullable, FK → `channel_topics.id`, `ON DELETE SET NULL`) + `(chat_id, topic_id)` index
+- Sending with or without a topic is both always allowed; a non-null `topicId` is validated server-side to belong to the same channel
+- New STOMP destination `/topic/channels/{channelId}/topics/{topicId}` — a topic-tagged message is broadcast there **in addition to** the existing channel-wide `/topic/channels/{channelId}` stream
+- REST history gained an optional `topicId` filter (`none` = messages with no topic)
+- Frontend: per-topic filtered views, each independently paginated, plus a topic selector that also determines which topic a new message is sent to
+
+`media-service` remains an empty scaffold (see its own `README.md`) since no
+item in any sprint targets it.
+
+---
+
+## 1. Architecture at a glance
+
+```
+frontend (React + TS)
+  ├─ REST  (axios)  ──────────► identity-service  :8081  (register/login/refresh/logout)
+  ├─ REST  (axios)  ──────────► core-service :8082  (channel/member/history reads, delete channel)
+  └─ STOMP over WS  ──────────► core-service :8082  /ws/connect
+                                   authenticated via the JWT access token
+                                   issued by identity-service (shared secret)
+```
+
+**Why the split:** REST is used only for non-realtime reads (and the one
+administrative action, deleting a channel). Creating a channel, sending a
+message, changing a role, and blocking/restricting a member are all
+real-time, multi-party events — every other member's screen needs to update
+the instant one of these happens — so they flow exclusively through STOMP
+`/app/**` destinations and are broadcast back out on `/topic/channels/**`.
+No REST endpoint exists for any of those four actions.
+
+Both services validate the *same* HS256 JWT secret (`JWT_SECRET`), but only
+identity-service ever signs a token. core-service's `JwtTokenValidator`
+is verification-only — see `security/JwtTokenValidator.java`.
+
+---
+
+## 2. Analysis & implementation notes
+
+### Channel schema (`channels`, `channel_members`, `channel_topics`)
+- `channels`: UUID PK, `name`, `description`, `created_by` (logical ref to
+  identity-service's `users.id` — no cross-DB FK), `deleted_at` for the
+  soft-delete used by US-13.
+- `channel_members`: composite PK `(channel_id, user_id)` — this doubles as
+  the required `unique(channel_id, user_id)` constraint. Carries `role`
+  (`OWNER`/`MANAGER`/`MODERATOR`/`MEMBER`) and `status`
+  (`ACTIVE`/`RESTRICTED`/`BLOCKED`) as separate columns, plus the ERD's
+  `media_allowed` flag. Indexed on `user_id`.
+- `channel_topics`: seeded with one default "معرفی" topic per new channel
+  (matches the wireframe's `# معرفی` tag); unique on `(channel_id, name)`.
+
+### Messaging schema (`messages`, `search_outbox`)
+- `messages`: generic `chat_type`/`chat_id` pair (only `CHANNEL` is produced
+  today, but the same table can carry `DM` messages later without a
+  migration). `media_id` is a logical reference to media-service's
+  `media_files` — different service, different database, so no FK. A DB
+  trigger keeps `content_tsv` in sync for full-text search. Composite index
+  on `(chat_id, created_at DESC)` serves the history-pagination query.
+- `search_outbox`: **transactional outbox pattern** — every message
+  insert writes a matching outbox row in the *same* DB transaction
+  (`MessageServiceImpl.sendMessage`), so a future search-indexing consumer
+  can safely poll `processed = false` without ever missing or double
+  -processing an event.
+
+### US-09 — Create channel
+STOMP `SEND /app/channels.create` → `ChannelWebSocketController.createChannel`
+→ `ChannelService.createChannel` (creates the channel, adds the caller as
+`OWNER`, seeds the default topic) → replied to the creator only, on
+`/user/queue/channels`, since nobody else is subscribed to a channel that
+didn't exist a second ago. Other users see it next time they load
+`ChannelListPage` (REST `GET /api/channels`).
+
+### US-04 — Send message in a public channel
+STOMP `SEND /app/messages.send` → validates the sender is an `ACTIVE`
+member (`MembershipService.requireCanSend`) → persists `Message` +
+`SearchOutbox` row → broadcasts a `MESSAGE_NEW` event to
+`/topic/channels/{channelId}` (and, if the message carries a `topicId`,
+*also* to `/topic/channels/{channelId}/topics/{topicId}` — see
+"Topic-aware messaging" below). **Never available over REST** — this is
+the one rule the spec is strictest about.
+
+### US-05 — View channel messages in real time
+Two halves, by design: history is a REST `GET
+/api/channels/{id}/messages?before=&limit=` (cursor pagination, newest
+page first) loaded once when a user opens a channel; everything after that
+arrives live via the `/topic/channels/{channelId}` subscription opened at
+the same time. `useChannelSession` (frontend) stitches the two together
+into one ordered, ever-growing message list — now one per topic bucket,
+see below.
+
+### Topic-aware messaging
+A message MAY belong to one of its channel's topics — this is a
+first-class dimension through every layer, not a decoration:
+
+- **DB**: `messages.topic_id` (nullable, FK → `channel_topics.id`,
+  `ON DELETE SET NULL` so a deleted topic's messages fall back to the
+  no-topic bucket instead of being destroyed), indexed on `(chat_id, topic_id)`.
+- **Validation**: `MessageServiceImpl.resolveTopic` rejects a `topicId`
+  that doesn't exist or belongs to a *different* channel
+  (`InvalidTopicException`, mapped to `400`/`VALIDATION_ERROR` on REST/WS
+  respectively). A topic never overrides channel permissions — the exact
+  same `requireCanSend` (ACTIVE-membership) check runs regardless of
+  whether the message is topic-tagged.
+- **WS broadcast**: every message goes to the channel-wide
+  `/topic/channels/{channelId}` stream ("all messages"); a topic-tagged
+  message is *additionally* broadcast to
+  `/topic/channels/{channelId}/topics/{topicId}` (filtered). Since the
+  frontend can legitimately be subscribed to both at once, it de-duplicates
+  incoming messages by `id`.
+- **REST history**: `GET /api/channels/{id}/messages` gained an optional
+  `topicId` param — omitted (unfiltered), a topic's UUID (that topic only),
+  or the literal `none` (only messages with no topic). Each of these three
+  views is paginated completely independently (`MessageRepository
+  .findTopicHistoryPage`; the two spec-required finders,
+  `findByChatIdAndTopicId`/`findByChatIdAndTopicIdIsNull`, are also
+  available as simpler, unpaginated queries).
+- **Frontend**: `useChannelSession` keeps one independently-paginated
+  "bucket" per view (`All`, `no topic`, and one per real topic); switching
+  `selectedTopicId` via the new `TopicSelector` component swaps which
+  bucket is rendered *and* which topic newly sent messages are tagged
+  with. `MessageList` shows a small `#topic-name` tag per message in the
+  unfiltered view (redundant once already filtered to one topic).
+
+### US-10 — Channel settings screen (member list & roles)
+`GET /api/channels/{id}` (or the dedicated `GET
+/api/channels/{id}/members`) loads the roster; `ChannelSettingsPage` renders
+it via `RoleManagementPanel`, which also subscribes to
+`/topic/channels/{channelId}/members` so role/status changes made by anyone
+(including other admins acting concurrently) appear live.
+
+### US-11 — Assign channel member roles
+STOMP `SEND /app/channels.updateRole` → `MembershipService.updateRole`
+enforces, in order: you cannot change your own role; the `OWNER`'s role can
+never be changed; only `OWNER` may grant/revoke `MANAGER`; only `OWNER` or
+`MANAGER` may assign a role at all; the actor must strictly outrank the
+target's *current* role (so a `MANAGER` cannot touch another `MANAGER`).
+Broadcasts `MEMBER_ROLE_UPDATED` to `/topic/channels/{channelId}/members`.
+
+### US-12 — Block/restrict a channel member
+STOMP `SEND /app/channels.blockMember` with `newStatus` ∈
+`{ACTIVE, RESTRICTED, BLOCKED}` — the same handler lifts a
+block/restriction by sending `ACTIVE`. `MembershipService.updateStatus`
+requires the actor be `MODERATOR`+ and strictly outrank the target.
+`RESTRICTED` members can still read (history + live feed, in every topic);
+`BLOCKED` members are rejected even at the STOMP `SUBSCRIBE` stage by
+`JwtChannelInterceptor` — for *any* of a channel's destinations, topic
+-specific or not — so they stop receiving the channel's events immediately,
+not just on their next send attempt. A topic never grants an exception to
+this: blocked is blocked, in every topic and in the no-topic bucket alike.
+
+### US-13 — Delete channel
+Modeled as **REST**, not WS: `DELETE /api/channels/{id}` (`OWNER` only),
+because it's a one-off administrative action rather than a live multi-party
+event stream. It soft-deletes (`deleted_at`, message history is preserved
+for audit) and then broadcasts a `CHANNEL_DELETED` event to both
+`/topic/channels/{channelId}` and `/topic/channels/{channelId}/members` from
+inside the service layer, so anyone currently viewing the channel is kicked
+back to the channel list in real time even though the delete itself was
+triggered over HTTP.
+
+---
+
+## 3. WebSocket authentication & authorization
+
+`JwtChannelInterceptor` (a Spring `ChannelInterceptor` on the client-inbound
+STOMP channel) does two distinct jobs:
+
+1. **On `CONNECT`** — reads the `Authorization: Bearer <token>` STOMP
+   header, validates it with `JwtTokenValidator` (same secret
+   identity-service signs with), and attaches a `StompPrincipal` to the
+   session. Every later frame on that session is now tied to a real user.
+2. **On `SUBSCRIBE`** to `/topic/channels/{id}`, `/topic/channels/{id}/members`,
+   or `/topic/channels/{id}/topics/{topicId}` — checks the authenticated user
+   is actually a member of that channel and not `BLOCKED`. A valid JWT alone
+   is not enough to listen in on an arbitrary channel's live feed; you also
+   have to belong to it. Authorization is always channel-scoped, even for
+   the topic-specific destination — a topic never carries its own separate
+   ACL (see "Topic-aware messaging" above).
+
+`@MessageMapping` handlers additionally re-check membership/role/status via
+`MembershipService` before doing anything, and `@MessageExceptionHandler`
+methods route every rejection to the offending client's own
+`/user/queue/errors` — errors are never broadcast to the whole channel.
+
+---
+
+## 4. STOMP destinations reference
+
+| Destination | Direction | Purpose |
+|---|---|---|
+| `/ws/connect` | connect | SockJS-wrapped STOMP endpoint (also registered without SockJS for native WS clients) |
+| `/app/channels.create` | client → server | US-09 |
+| `/app/messages.send` | client → server | US-04 (payload includes optional `topicId`) |
+| `/app/channels.updateRole` | client → server | US-11 |
+| `/app/channels.blockMember` | client → server | US-12 |
+| `/topic/channels/{channelId}` | server → clients | `MESSAGE_NEW` (all messages, any topic or none), `CHANNEL_DELETED` |
+| `/topic/channels/{channelId}/topics/{topicId}` | server → clients | `MESSAGE_NEW`, filtered to one topic — sent *in addition to* the channel-wide stream above whenever a message carries that `topicId` |
+| `/topic/channels/{channelId}/members` | server → clients | `MEMBER_ROLE_UPDATED`, `MEMBER_STATUS_UPDATED`, `CHANNEL_DELETED` |
+| `/user/queue/channels` | server → creator only | `CHANNEL_CREATED` reply to `channels.create` |
+| `/user/queue/errors` | server → offending client only | rejected actions |
+
+Every server → client payload is wrapped in the same envelope:
+```json
+{ "type": "MESSAGE_NEW", "timestamp": "...", "payload": { /* MessageResponse, ChannelMemberResponse, etc. */ } }
+```
+`MessageResponse.topicId` is `null` for a general, topic-less message.
+
+---
+
+## 5. REST reference (non-realtime only)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/channels` | channels the caller belongs to |
+| GET | `/api/channels/{id}` | full detail: members + topics |
+| GET | `/api/channels/{id}/members` | member list & roles (US-10) |
+| GET | `/api/channels/{id}/messages?before=&limit=&topicId=` | paginated history (US-05, initial load); `topicId` omitted = unfiltered, a topic's UUID = that topic only, `none` = no-topic messages only |
+| DELETE | `/api/channels/{id}` | US-13, `OWNER` only |
+
+Identity endpoints (`/api/auth/register|login|refresh|logout`) are
+unchanged from Sprint 1 — see the inline comments in
+`AuthController`/`AuthService` for details.
+
+---
+
+## 6. Running locally
+
+### Full stack via Docker Compose
+```bash
+cd docker
+docker compose up --build
+```
+Starts `identity-postgres` (`5432`), `identity-service` (`8081`),
+`core-postgres` (`5433`), and `core-service` (`8082`). Flyway
+migrates both services' schemas automatically on boot.
+
+### Backend only (local Postgres, run each service in its own shell)
+```bash
+# identity-service
+cd backend-services/identity-service
+export DB_HOST=localhost DB_USER=identity_user DB_PASSWORD=identity_pass DB_NAME=identity_db
+export JWT_SECRET=$(openssl rand -base64 48)
+mvn spring-boot:run
+```
+```bash
+# core-service — MUST use the same JWT_SECRET as identity-service above
+cd backend-services/core-service
+export DB_HOST=localhost DB_PORT=5433 DB_USER=core_user DB_PASSWORD=core_pass DB_NAME=core_db
+export JWT_SECRET=<same value as identity-service's>
+mvn spring-boot:run
+```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Vite proxies `/api/auth/*` → identity-service (`8081`), `/api/channels/*`
+and `/ws/*` (including the WebSocket upgrade) → core-service (`8082`)
+— see `vite.config.ts`. Set `VITE_API_BASE_URL` / `VITE_WS_URL` to override
+in production builds.
+
+---
+
+## 7. Environment variables
+
+**identity-service**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `identity_db` / `identity_user` / `identity_pass` | Postgres connection |
+| `JWT_SECRET` | dev-only placeholder | HS256 signing key — **must** be a long random secret in production, and **must match core-service's** |
+| `JWT_ACCESS_EXP_MS` | `900000` (15 min) | Access token lifetime |
+| `JWT_REFRESH_EXP_MS` | `604800000` (7 days) | Refresh token lifetime |
+
+**core-service**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `core_db` / `core_user` / `core_pass` | Postgres connection (separate DB from identity-service) |
+| `JWT_SECRET` | dev-only placeholder | **Must exactly match** identity-service's — this service only validates, never signs |
+
+---
+
+## 8. Known simplifications / follow-ups for later sprints
+
+- **Member display names**: `channel_members` only stores `user_id` (a
+  logical reference); the frontend currently renders a truncated UUID as a
+  placeholder. A real deployment would enrich member rows with
+  `display_name`/`avatar_url` from identity-service's `profiles` table,
+  either via a batched lookup call or a small denormalized read model kept
+  in sync via an event.
+- **Token freshness on long-lived WS sessions**: the STOMP session is
+  authenticated once at `CONNECT` time; it is not re-validated per frame
+  after that, so a connection can outlive the access token that opened it.
+  `socketService`'s `beforeConnect` hook re-reads the latest token on every
+  (re)connect, which covers reconnects after a network blip, but a fully
+  rigorous implementation would also proactively cycle the WS connection
+  when the REST layer refreshes the access token.
+- **`search_outbox` consumer**: rows are written but nothing currently
+  drains them — a real search-indexing worker (Elasticsearch/OpenSearch,
+  etc.) would poll `processed = false` and mark rows processed.
+- **`@Valid` on STOMP `@Payload` DTOs**: Spring's WebSocket/STOMP support
+  auto-wires a Bean Validation `Validator` for `@MessageMapping` arguments
+  when Hibernate Validator is on the classpath (which it is here, via
+  `spring-boot-starter-validation`), the same way `@Valid @RequestBody`
+  works for REST — no extra config needed. If that ever changes upstream,
+  the service-layer checks (`MembershipService`, `MessageServiceImpl`)
+  still enforce every invariant that actually matters for correctness;
+  only the friendliness of field-level error messages would regress.
+- **Ownership transfer**: intentionally out of scope — `updateRole`
+  explicitly rejects any attempt to change the `OWNER`'s role or promote a
+  new one, so every channel always has exactly one, immutable owner for now.
+- **Topic management**: creating/renaming/deleting *additional* topics
+  beyond the default "معرفی" one seeded at channel creation is not exposed
+  yet (no `POST /api/channels/{id}/topics` or WS equivalent) — the schema,
+  validation, and every messaging layer are already fully topic-aware and
+  ready for it, but the CRUD surface for topics themselves is a natural
+  next slice.
+- Consider rate-limiting `/api/auth/login` and `/api/auth/register`, and a
+  scheduled cleanup of expired/revoked `refresh_tokens` rows (see Sprint 1
+  notes, still applicable).
