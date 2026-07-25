@@ -1,0 +1,49 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { SocketProvider } from './context/SocketContext';
+import { ProtectedRoute } from './routes/ProtectedRoute';
+import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
+import { ChannelListPage } from './pages/ChannelListPage';
+import { ChannelViewPage } from './pages/ChannelViewPage';
+import { ChannelSettingsPage } from './pages/ChannelSettingsPage';
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <SocketProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <ChannelListPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/channels/:channelId"
+              element={
+                <ProtectedRoute>
+                  <ChannelViewPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/channels/:channelId/settings"
+              element={
+                <ProtectedRoute>
+                  <ChannelSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </SocketProvider>
+    </AuthProvider>
+  );
+}
