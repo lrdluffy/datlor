@@ -1,0 +1,90 @@
+name: datlor
+
+version: "3.9"
+
+services:
+  identity-postgres:
+    image: postgres:16-alpine
+    container_name: identity-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: identity_db
+      POSTGRES_USER: identity_user
+      POSTGRES_PASSWORD: identity_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - identity_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U identity_user -d identity_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  identity-service:
+    build:
+      context: ../backend-services/identity-service
+      dockerfile: Dockerfile
+    container_name: identity-service
+    restart: unless-stopped
+    depends_on:
+      identity-postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: identity-postgres
+      DB_PORT: 5432
+      DB_NAME: identity_db
+      DB_USER: identity_user
+      DB_PASSWORD: identity_pass
+      # MUST match core-service's JWT_SECRET below - identity-service
+      # signs tokens, core-service only validates them.
+      JWT_SECRET: change-me-in-production-to-a-long-random-secret
+      JWT_ACCESS_EXP_MS: 900000
+      JWT_REFRESH_EXP_MS: 604800000
+    ports:
+      - "8081:8081"
+
+  # Separate Postgres instance for core-service, per the
+  # each-microservice-owns-its-own-database rule (no cross-DB foreign keys
+  # to identity-service's users table - see the migration comments).
+  core-postgres:
+    image: postgres:16-alpine
+    container_name: core-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: core_db
+      POSTGRES_USER: core_user
+      POSTGRES_PASSWORD: core_pass
+    ports:
+      - "5433:5432"
+    volumes:
+      - core_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core_user -d core_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  core-service:
+    build:
+      context: ../backend-services/core-service
+      dockerfile: Dockerfile
+    container_name: core-service
+    restart: unless-stopped
+    depends_on:
+      core-postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: core-postgres
+      DB_PORT: 5432
+      DB_NAME: core_db
+      DB_USER: core_user
+      DB_PASSWORD: core_pass
+      # MUST match identity-service's JWT_SECRET above.
+      JWT_SECRET: change-me-in-production-to-a-long-random-secret
+    ports:
+      - "8082:8082"
+
+volumes:
+  identity_pg_data:
+  core_pg_data:
