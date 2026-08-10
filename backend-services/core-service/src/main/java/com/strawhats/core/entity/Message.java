@@ -1,6 +1,7 @@
 package com.strawhats.core.entity;
 
 import com.strawhats.core.entity.enums.ChatType;
+import com.strawhats.core.entity.enums.MessageStatus;
 import com.strawhats.core.entity.enums.MessageType;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -70,6 +71,20 @@ public class Message {
     @Column(name = "edited", nullable = false)
     @Builder.Default
     private boolean edited = false;
+
+    /**
+     * US-19: null for an immediate message. When set (and in the future at
+     * creation time), the message is persisted with status=PENDING and is
+     * NOT broadcast until ScheduledMessageDispatcher's background job fires
+     * it and flips status to SENT.
+     */
+    @Column(name = "scheduled_at")
+    private LocalDateTime scheduledAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    @Builder.Default
+    private MessageStatus status = MessageStatus.SENT;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
