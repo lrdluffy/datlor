@@ -30,8 +30,9 @@ public class Profile {
     @Column(name = "display_name", nullable = false)
     private String displayName;
 
-    @Column(name = "avatar_url")
-    private String avatarUrl;
+    /** Logical reference to media-service's media_files.id - no cross-DB FK. */
+    @Column(name = "avatar_media_id")
+    private UUID avatarMediaId;
 
     @Column(name = "bio")
     private String bio;
