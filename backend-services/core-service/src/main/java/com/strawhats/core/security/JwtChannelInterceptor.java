@@ -1,8 +1,11 @@
 package com.strawhats.core.security;
 
 import com.strawhats.core.entity.ChannelMember;
+import com.strawhats.core.entity.GroupMember;
+import com.strawhats.core.entity.enums.GroupMemberStatus;
 import com.strawhats.core.entity.enums.MemberStatus;
 import com.strawhats.core.repository.ChannelMemberRepository;
+import com.strawhats.core.repository.GroupMemberRepository;
 import org.springframework.lang.NonNull;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessagingException;
@@ -25,14 +28,15 @@ import java.util.regex.Pattern;
  *    validate it, and attach a {@link StompPrincipal} to the session so
  *    every subsequent frame on this session is attributed to a real user.
  *
- * 2. On SUBSCRIBE to /topic/channels/{id}, /topic/channels/{id}/members, or
- *    /topic/channels/{id}/topics/{topicId} - a valid JWT alone is not
- *    enough; a user must also be a non-blocked member of the specific
- *    channel they're subscribing to. This stops an authenticated-but
- *    -unrelated user from listening in on a channel's live feed by simply
- *    guessing its UUID. Authorization is always channel-scoped even for the
- *    topic-specific destination - a topic never carries its own separate
- *    ACL, matching "topic does NOT override channel permissions".
+ * 2. On SUBSCRIBE to /topic/channels/{id}(/members|/topics/{topicId}) OR
+ *    /topic/groups/{id}(/members) - a valid JWT alone is not enough; a
+ *    user must also be a non-blocked channel member, or an ACTIVE group
+ *    member, of whichever one they're subscribing to. This stops an
+ *    authenticated-but-unrelated user from listening in on a live feed by
+ *    simply guessing its UUID. Authorization is always scoped to the
+ *    channel/group itself, never to the sub-resource - a topic never
+ *    carries its own separate ACL ("topic does NOT override channel
+ *    permissions"), and neither does a group's members sub-topic.
  */
 @Component
 public class JwtChannelInterceptor implements ChannelInterceptor {
@@ -40,13 +44,19 @@ public class JwtChannelInterceptor implements ChannelInterceptor {
     private static final Pattern CHANNEL_TOPIC_PATTERN =
             Pattern.compile("^/topic/channels/([0-9a-fA-F-]{36})(?:/members|/topics/[0-9a-fA-F-]{36})?$");
 
+    private static final Pattern GROUP_TOPIC_PATTERN =
+            Pattern.compile("^/topic/groups/([0-9a-fA-F-]{36})(?:/members)?$");
+
     private final JwtTokenValidator jwtTokenValidator;
     private final ChannelMemberRepository channelMemberRepository;
+    private final GroupMemberRepository groupMemberRepository;
 
     public JwtChannelInterceptor(JwtTokenValidator jwtTokenValidator,
-                                  ChannelMemberRepository channelMemberRepository) {
+                                  ChannelMemberRepository channelMemberRepository,
+                                  GroupMemberRepository groupMemberRepository) {
         this.jwtTokenValidator = jwtTokenValidator;
         this.channelMemberRepository = channelMemberRepository;
+        this.groupMemberRepository = groupMemberRepository;
     }
 
     @Override
@@ -81,16 +91,23 @@ public class JwtChannelInterceptor implements ChannelInterceptor {
             return;
         }
 
-        Matcher matcher = CHANNEL_TOPIC_PATTERN.matcher(destination);
-        if (!matcher.matches()) {
-            // Not a per-channel topic (e.g. a /user/queue/** destination) - nothing to check here.
+        Matcher channelMatcher = CHANNEL_TOPIC_PATTERN.matcher(destination);
+        if (channelMatcher.matches()) {
+            authorizeChannelSubscription(accessor, channelMatcher);
             return;
         }
 
-        if (!(accessor.getUser() instanceof StompPrincipal principal)) {
-            throw new InvalidWebSocketTokenException("Subscription attempted on an unauthenticated session");
+        Matcher groupMatcher = GROUP_TOPIC_PATTERN.matcher(destination);
+        if (groupMatcher.matches()) {
+            authorizeGroupSubscription(accessor, groupMatcher);
+            return;
         }
 
+        // Not a per-channel or per-group topic (e.g. a /user/queue/** destination) - nothing to check here.
+    }
+
+    private void authorizeChannelSubscription(StompHeaderAccessor accessor, Matcher matcher) {
+        StompPrincipal principal = requireAuthenticatedPrincipal(accessor);
         UUID channelId = UUID.fromString(matcher.group(1));
 
         ChannelMember membership = channelMemberRepository
@@ -103,6 +120,28 @@ public class JwtChannelInterceptor implements ChannelInterceptor {
                     "User " + principal.getUserId() + " is blocked from channel " + channelId);
         }
         // RESTRICTED members may still read (subscribe) - only sending is denied elsewhere.
+    }
+
+    private void authorizeGroupSubscription(StompHeaderAccessor accessor, Matcher matcher) {
+        StompPrincipal principal = requireAuthenticatedPrincipal(accessor);
+        UUID groupId = UUID.fromString(matcher.group(1));
+
+        GroupMember membership = groupMemberRepository
+                .findByGroup_IdAndUserId(groupId, principal.getUserId())
+                .orElseThrow(() -> new MessagingException(
+                        "User " + principal.getUserId() + " is not a member of group " + groupId));
+
+        if (membership.getStatus() != GroupMemberStatus.ACTIVE) {
+            throw new MessagingException(
+                    "User " + principal.getUserId() + " is not an active member of group " + groupId);
+        }
+    }
+
+    private StompPrincipal requireAuthenticatedPrincipal(StompHeaderAccessor accessor) {
+        if (!(accessor.getUser() instanceof StompPrincipal principal)) {
+            throw new InvalidWebSocketTokenException("Subscription attempted on an unauthenticated session");
+        }
+        return principal;
     }
 
     private String extractToken(StompHeaderAccessor accessor) {
