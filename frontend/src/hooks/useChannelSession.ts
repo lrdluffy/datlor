@@ -27,6 +27,14 @@ function bucketKeyFor(selectedTopicId: string | null): string {
   return selectedTopicId ?? ALL_BUCKET_KEY;
 }
 
+export interface SendMessageOptions {
+  content?: string;
+  type?: MessageType;
+  mediaId?: string;
+  /** US-19: a future ISO timestamp defers delivery; omit sends immediately. */
+  scheduledAt?: string;
+}
+
 interface UseChannelSessionResult {
   channel: ChannelDetailResponse | null;
   /** The currently displayed message list - derived from whichever bucket `selectedTopicId` points at. */
@@ -40,7 +48,9 @@ interface UseChannelSessionResult {
   wasDeleted: boolean;
   loadOlderMessages: () => Promise<void>;
   hasMoreHistory: boolean;
-  sendMessage: (content: string, type?: MessageType) => void;
+  sendMessage: (options: SendMessageOptions) => void;
+  /** US-19: messages the current user scheduled that haven't fired yet (private, never seen by anyone else). */
+  myScheduledMessages: MessageResponse[];
   updateRole: (targetUserId: string, newRole: ChannelRole) => void;
   updateMemberStatus: (targetUserId: string, newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED') => void;
 }
@@ -74,6 +84,7 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
   const [isChannelLoading, setIsChannelLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [wasDeleted, setWasDeleted] = useState(false);
+  const [myScheduledMessages, setMyScheduledMessages] = useState<MessageResponse[]>([]);
 
   // Tracks which buckets have an initial load in flight or done, without
   // needing `buckets` itself in effect dependency arrays (which would
@@ -194,10 +205,20 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
       setError(err.message);
     });
 
+    // US-19: private ack that one of THIS channel's messages was scheduled
+    // rather than sent immediately - filtered by chatId since this queue is
+    // shared across every channel/group the user might be sending to.
+    const unsubScheduled = socketService.onMessageScheduled((event) => {
+      if (event.payload.chatId === channelId) {
+        setMyScheduledMessages((prev) => [...prev, event.payload]);
+      }
+    });
+
     return () => {
       unsubChannel();
       unsubMembers();
       unsubErrors();
+      unsubScheduled();
     };
   }, [channelId, connected]);
 
@@ -250,13 +271,20 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
   }, [channelId, currentBucketKey, buckets]);
 
   const sendMessage = useCallback(
-    (content: string, type: MessageType = 'TEXT') => {
+    (options: SendMessageOptions) => {
       if (!channelId) return;
       // A message inherits whichever real topic is currently selected; the
       // "All" and "no topic" views both send general, topic-less messages.
       const topicId =
         selectedTopicId && selectedTopicId !== GENERAL_BUCKET_KEY ? selectedTopicId : undefined;
-      socketService.sendMessage({ channelId, type, content, topicId });
+      socketService.sendMessage({
+        channelId,
+        type: options.type ?? 'TEXT',
+        content: options.content,
+        mediaId: options.mediaId,
+        scheduledAt: options.scheduledAt,
+        topicId,
+      });
     },
     [channelId, selectedTopicId]
   );
@@ -291,6 +319,7 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
     loadOlderMessages,
     hasMoreHistory: currentBucket.hasMore,
     sendMessage,
+    myScheduledMessages,
     updateRole,
     updateMemberStatus,
   };
