@@ -5,12 +5,16 @@ import {
   ChannelCreatedEvent,
   ChannelTopicEvent,
   CreateChannelRequest,
+  GroupInviteEvent,
+  GroupMembersTopicEvent,
+  GroupTopicEvent,
   MembersTopicEvent,
+  MessageScheduledEvent,
   UpdateMemberStatusRequest,
   UpdateRoleRequest,
   WsErrorMessage,
 } from '../types/ws';
-import { SendMessageRequest } from '../types/message';
+import { GroupMessageRequest, SendMessageRequest } from '../types/message';
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? '/ws/connect';
 
@@ -111,6 +115,30 @@ class SocketService {
     return this.subscribe('/user/queue/channels', onEvent);
   }
 
+  /** /topic/groups/{groupId} - live group messages (Groups ≠ Channels: a separate stream from channels). */
+  subscribeToGroup(groupId: string, onEvent: (event: GroupTopicEvent) => void): Unsubscribe {
+    return this.subscribe(`/topic/groups/${groupId}`, onEvent);
+  }
+
+  /** /topic/groups/{groupId}/members - live group membership events (invite accepted / direct add). */
+  subscribeToGroupMembers(groupId: string, onEvent: (event: GroupMembersTopicEvent) => void): Unsubscribe {
+    return this.subscribe(`/topic/groups/${groupId}/members`, onEvent);
+  }
+
+  /** /user/queue/invites - unicast: a new invite (as invitee) or a response to one you sent (as inviter). */
+  onGroupInviteEvent(onEvent: (event: GroupInviteEvent) => void): Unsubscribe {
+    return this.subscribe('/user/queue/invites', onEvent);
+  }
+
+  /**
+   * US-19: private ack that YOUR message was scheduled rather than sent
+   * immediately - never broadcast to the channel/group, since nobody else
+   * should see a message that hasn't actually gone out yet.
+   */
+  onMessageScheduled(onEvent: (event: MessageScheduledEvent) => void): Unsubscribe {
+    return this.subscribe('/user/queue/scheduled', onEvent);
+  }
+
   /** /user/queue/errors - unicast rejection of any of this user's own WS actions. */
   onError(onEvent: (error: WsErrorMessage) => void): Unsubscribe {
     return this.subscribe('/user/queue/errors', onEvent);
@@ -128,6 +156,11 @@ class SocketService {
   /** US-04: Send message in a public channel. */
   sendMessage(payload: SendMessageRequest): void {
     this.publish('/app/messages.send', payload);
+  }
+
+  /** US-04-equivalent for groups: send a group message (immediate or scheduled, US-19; optional media, US-18). */
+  sendGroupMessage(payload: GroupMessageRequest): void {
+    this.publish('/app/groups.messages.send', payload);
   }
 
   /** US-11: Assign channel member roles. */
