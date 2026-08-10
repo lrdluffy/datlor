@@ -1,6 +1,6 @@
-# Datlor — Identity + Core Messaging Platform
+# Datlor — Identity + Core Messaging + Media Platform
 
-Two sprints implemented against `SD_PROJ.pdf`:
+Four sprints implemented against `SD_PROJ.pdf`:
 
 **Sprint 1 — identity-service** (auth foundation)
 
@@ -32,8 +32,20 @@ Two sprints implemented against `SD_PROJ.pdf`:
 - REST history gained an optional `topicId` filter (`none` = messages with no topic)
 - Frontend: per-topic filtered views, each independently paginated, plus a topic selector that also determines which topic a new message is sent to
 
-`media-service` remains an empty scaffold (see its own `README.md`) since no
-item in any sprint targets it.
+**Sprint 4 — media, scheduling, groups, and profile/privacy**
+
+| # | Item |
+|---|------|
+| 1 | Design & migrate media schema (`media_files`) (media-service) |
+| 2 | US-18 — Attach media to a message (media-service & core-service) |
+| 3 | US-19 — Schedule a message for later delivery (core-service) |
+| 4 | Design & migrate group schema (`groups`, `group_members`, `group_invites`) (core-service) |
+| 5 | Implement group creation & invitations (core-service) |
+| 6 | US-15 — Edit user profile (identity-service) |
+| 7 | US-17 — Privacy setting: allow direct group add toggle (identity-service & core-service) |
+
+`media-service` is now a fully implemented microservice (see section 2 below)
+rather than an empty scaffold.
 
 ---
 
@@ -41,24 +53,35 @@ item in any sprint targets it.
 
 ```
 frontend (React + TS)
-  ├─ REST  (axios)  ──────────► identity-service  :8081  (register/login/refresh/logout)
-  ├─ REST  (axios)  ──────────► core-service :8082  (channel/member/history reads, delete channel)
+  ├─ REST  (axios)  ──────────► identity-service  :8081  (register/login/refresh/logout, profile edit, privacy toggle)
+  ├─ REST  (axios)  ──────────► core-service :8082  (channel/group/member/history reads, delete channel, invites, direct-add)
+  ├─ REST  (axios)  ──────────► media-service :8083  (file upload, metadata, content download)
   └─ STOMP over WS  ──────────► core-service :8082  /ws/connect
                                    authenticated via the JWT access token
                                    issued by identity-service (shared secret)
+
+core-service also calls, service-to-service, over plain HTTP + a shared
+X-Internal-Api-Key header (never through either service's database):
+  ├─ core-service ──► identity-service  GET /internal/profiles/{userId}/privacy   (US-17)
+  └─ core-service ──► media-service     GET /internal/media/{mediaId}/exists      (US-18)
 ```
 
-**Why the split:** REST is used only for non-realtime reads (and the one
-administrative action, deleting a channel). Creating a channel, sending a
-message, changing a role, and blocking/restricting a member are all
-real-time, multi-party events — every other member's screen needs to update
-the instant one of these happens — so they flow exclusively through STOMP
-`/app/**` destinations and are broadcast back out on `/topic/channels/**`.
-No REST endpoint exists for any of those four actions.
+**Why the split:** REST is used only for non-realtime reads/administrative
+actions (deleting a channel, creating a group, sending/accepting/rejecting an
+invite, editing a profile, uploading a file). Creating a channel, sending a
+message (immediate or scheduled), changing a role, and blocking/restricting a
+member are all real-time, multi-party events — every other member's screen
+needs to update the instant one of these happens — so they flow exclusively
+through STOMP `/app/**` destinations and are broadcast back out on
+`/topic/channels/**` or `/topic/groups/**`. No REST endpoint exists for any
+of those actions.
 
-Both services validate the *same* HS256 JWT secret (`JWT_SECRET`), but only
-identity-service ever signs a token. core-service's `JwtTokenValidator`
-is verification-only — see `security/JwtTokenValidator.java`.
+All three services validate the *same* HS256 JWT secret (`JWT_SECRET`), but
+only identity-service ever signs a token; core-service's and media-service's
+`JwtTokenValidator` classes are verification-only. Separately, the three
+services also share an `INTERNAL_API_KEY` used **only** to guard the
+`/internal/**` endpoints they call on each other (never a user-facing
+surface) — see section 3.
 
 ---
 
@@ -185,6 +208,110 @@ inside the service layer, so anyone currently viewing the channel is kicked
 back to the channel list in real time even though the delete itself was
 triggered over HTTP.
 
+### Media schema (`media_files`) + US-18 — Attach media to a message
+`media-service` owns exactly one table, `media_files` (`id`, `uploader_id`,
+`file_url`, `file_type`, `size`, `created_at`), indexed on `uploader_id`.
+`StorageService` is a small interface with one implementation today,
+`LocalStorageServiceImpl`, which simulates an S3-like object store by
+writing each upload to `{media.storage.root}/{mediaId}` on local disk —
+swapping in a real S3/MinIO-backed implementation later touches only that
+one class. **File bytes never enter core-service's or identity-service's
+database**, only a `mediaId` (UUID) ever crosses a service boundary.
+
+`POST /api/media` (multipart) uploads a file and returns its `MediaFileResponse`
+(including `id`); `GET /api/media/{id}/content` streams the bytes back and is
+deliberately left **public** (no JWT) so it can be dropped straight into an
+`<img src>`/`<a href>`.
+
+For US-18, `SendMessageRequest`/`GroupMessageRequest` both carry an optional
+`mediaId`. Before persisting, `MessagePersistenceHelper` calls
+`MediaServiceClient.mediaExists(mediaId)` — a service-to-service HTTP call to
+media-service's `GET /internal/media/{id}/exists` (guarded by a shared
+`X-Internal-Api-Key` header, not a user JWT) — and rejects the message with
+`InvalidMediaException` if the file doesn't exist. **core-service never
+queries media-service's database directly**; this HTTP call is the only
+sanctioned way it learns whether a `mediaId` is real. The resulting
+`MessageResponse.mediaId` flows through the same WebSocket broadcast as any
+other message.
+
+### US-19 — Schedule a message for later delivery
+`messages` gained `scheduled_at` (nullable `TIMESTAMP`) and `status`
+(`PENDING`/`SENT`, default `SENT`), with a partial index on `scheduled_at
+WHERE status = 'PENDING'` so the dispatcher's polling query stays fast
+regardless of how much `SENT` history piles up.
+
+`SendMessageRequest`/`GroupMessageRequest` both carry an optional
+`scheduledAt`. In `MessagePersistenceHelper.persist`, a future `scheduledAt`
+persists the message as `PENDING` and — critically — `ChannelWebSocketController`/
+`GroupWebSocketController` check the returned status and **do NOT broadcast
+a `PENDING` message**; the sender instead gets a private
+`MESSAGE_SCHEDULED` ack on `/user/queue/scheduled`. `ScheduledMessageDispatcher`
+(`@Scheduled(fixedDelayString = "${scheduling.dispatcher.fixed-delay-ms}")`,
+default every 5s) is the **only** place a scheduled message is ever
+broadcast: it polls due `PENDING` rows, flips each to `SENT`, and publishes
+a `MessageDispatchedEvent` — deliberately **inside** that same transaction.
+A separate `MessageDispatchListener`, registered with
+`@TransactionalEventListener(phase = AFTER_COMMIT)`, performs the actual
+`SimpMessagingTemplate` broadcast only once that transaction has durably
+committed, so a client can never see a `MESSAGE_NEW` event for a status
+update that then failed to persist. From a receiving client's point of
+view, a dispatched scheduled message is indistinguishable from one sent
+immediately — it just arrived later.
+
+### Group schema (`groups`, `group_members`, `group_invites`)
+Deliberately isolated from the channel schema — nothing in `groups.sql`
+references a channel, and nothing in the channel schema references a group.
+`groups`: UUID PK, `name`, `created_by`. `group_members`: composite PK
+`(group_id, user_id)`, `role` (`ADMIN`/`MEMBER` — simpler than channels'
+4-tier role, matching groups' "smaller scope"), `status` (`ACTIVE`/`LEFT` —
+no `RESTRICTED`/`BLOCKED` tier). `group_invites`: `inviter_id`, `invitee_id`,
+`status` (`PENDING`/`ACCEPTED`/`REJECTED`), with a **partial unique index**
+on `(group_id, invitee_id) WHERE status = 'PENDING'` so a user can't have two
+simultaneously-pending invites to the same group while still preserving
+historical accept/reject rows from earlier invite cycles.
+
+Group **messaging** reuses the same `messages` table (`chat_type = 'GROUP'`,
+`chat_id = groupId`) via the shared `MessagePersistenceHelper`, but group
+**membership/authorization** is entirely separate: `GroupMessageServiceImpl`
+checks `GroupMemberRepository` (ACTIVE status only, no role hierarchy for
+sending), never `ChannelMemberRepository`. `GroupWebSocketController` is a
+distinct STOMP controller from `ChannelWebSocketController`, and
+`/app/groups.messages.send` broadcasts to `/topic/groups/{groupId}` — a
+separate stream from `/topic/channels/{channelId}`.
+
+### Group creation & invitations
+`POST /api/groups` creates the group and adds the creator as its sole
+`ADMIN` — modeled as REST, like channel deletion, since it's a one-off
+administrative action. `POST /api/groups/{id}/invites` (`ADMIN` only)
+creates a `PENDING` invite and pushes a private `GROUP_INVITE_CREATED` event
+to the invitee on `/user/queue/invites`. The invitee alone can
+`POST /api/groups/invites/{id}/accept` or `.../reject`; accepting creates the
+`GroupMember` row and broadcasts `GROUP_MEMBER_JOINED` to
+`/topic/groups/{groupId}/members`, and **either** response privately notifies
+the original inviter (`GROUP_INVITE_ACCEPTED`/`GROUP_INVITE_REJECTED`) on the
+same `/user/queue/invites` queue.
+
+### US-15 — Edit user profile
+`UpdateProfileRequest` (`displayName`, `bio`, `avatarMediaId`) via
+`PATCH /api/profiles/me`. `avatarMediaId` is a logical reference to a file
+already uploaded to media-service — this endpoint only ever accepts an id,
+never file bytes, matching the "core-service/identity-service store only a
+mediaId" rule. (`profiles.avatar_url` from Sprint 1 was replaced with
+`avatar_media_id UUID` in a dedicated migration — see `V2__profile_avatar_as_media_id.sql`.)
+
+### US-17 — Privacy setting: allow direct group add toggle
+`profiles.allow_direct_group_add` (added back in Sprint 1's initial schema)
+is now exposed via `PATCH /api/profiles/me/privacy`. The enforcement side
+lives in core-service: before `GroupServiceImpl.addMemberDirectly` adds
+someone **without** an invite, it calls
+`IdentityServiceClient.allowsDirectGroupAdd(userId)` — a service-to-service
+call to identity-service's `GET /internal/profiles/{userId}/privacy`
+(guarded by the same shared `X-Internal-Api-Key`) — and rejects with
+`DirectAddNotAllowedException` (`403`) if the flag is `false`, so the caller
+must fall back to `invite` instead. **core-service never reads
+identity-service's `profiles` table directly**; this HTTP call is the only
+sanctioned way it learns a user's preference.
+
 ---
 
 ## 3. WebSocket authentication & authorization
@@ -197,17 +324,20 @@ STOMP channel) does two distinct jobs:
    identity-service signs with), and attaches a `StompPrincipal` to the
    session. Every later frame on that session is now tied to a real user.
 2. **On `SUBSCRIBE`** to `/topic/channels/{id}`, `/topic/channels/{id}/members`,
-   or `/topic/channels/{id}/topics/{topicId}` — checks the authenticated user
-   is actually a member of that channel and not `BLOCKED`. A valid JWT alone
-   is not enough to listen in on an arbitrary channel's live feed; you also
-   have to belong to it. Authorization is always channel-scoped, even for
-   the topic-specific destination — a topic never carries its own separate
-   ACL (see "Topic-aware messaging" above).
+   `/topic/channels/{id}/topics/{topicId}`, `/topic/groups/{id}`, or
+   `/topic/groups/{id}/members` — checks the authenticated user is actually
+   an active member of that channel/group. A valid JWT alone is not enough
+   to listen in on an arbitrary live feed; you also have to belong to it.
+   Authorization is always channel/group-scoped, never resource-scoped — a
+   topic never carries its own separate ACL (see "Topic-aware messaging"
+   above), and neither does a group's members sub-topic.
 
 `@MessageMapping` handlers additionally re-check membership/role/status via
-`MembershipService` before doing anything, and `@MessageExceptionHandler`
-methods route every rejection to the offending client's own
-`/user/queue/errors` — errors are never broadcast to the whole channel.
+`MembershipService` (channels) or directly via `GroupMemberRepository`
+(groups) before doing anything, and `@MessageExceptionHandler` methods on
+both `ChannelWebSocketController` and `GroupWebSocketController` route
+every rejection to the offending client's own `/user/queue/errors` — errors
+are never broadcast to the whole channel/group.
 
 ---
 
@@ -217,24 +347,36 @@ methods route every rejection to the offending client's own
 |---|---|---|
 | `/ws/connect` | connect | SockJS-wrapped STOMP endpoint (also registered without SockJS for native WS clients) |
 | `/app/channels.create` | client → server | US-09 |
-| `/app/messages.send` | client → server | US-04 (payload includes optional `topicId`) |
+| `/app/messages.send` | client → server | US-04 (payload includes optional `topicId`, `mediaId`, `scheduledAt`) |
 | `/app/channels.updateRole` | client → server | US-11 |
 | `/app/channels.blockMember` | client → server | US-12 |
+| `/app/groups.messages.send` | client → server | Group-equivalent of `messages.send` (payload includes optional `mediaId`, `scheduledAt` - no `topicId`, groups have no topics) |
 | `/topic/channels/{channelId}` | server → clients | `MESSAGE_NEW` (all messages, any topic or none), `CHANNEL_DELETED` |
 | `/topic/channels/{channelId}/topics/{topicId}` | server → clients | `MESSAGE_NEW`, filtered to one topic — sent *in addition to* the channel-wide stream above whenever a message carries that `topicId` |
 | `/topic/channels/{channelId}/members` | server → clients | `MEMBER_ROLE_UPDATED`, `MEMBER_STATUS_UPDATED`, `CHANNEL_DELETED` |
+| `/topic/groups/{groupId}` | server → clients | `MESSAGE_NEW` for that group |
+| `/topic/groups/{groupId}/members` | server → clients | `GROUP_MEMBER_JOINED` (on invite-accept or direct-add) |
 | `/user/queue/channels` | server → creator only | `CHANNEL_CREATED` reply to `channels.create` |
+| `/user/queue/invites` | server → invitee (on create) or inviter (on accept/reject) | `GROUP_INVITE_CREATED`, `GROUP_INVITE_ACCEPTED`, `GROUP_INVITE_REJECTED` |
+| `/user/queue/scheduled` | server → sender only | `MESSAGE_SCHEDULED` — US-19 private ack that a message was deferred, NOT broadcast |
 | `/user/queue/errors` | server → offending client only | rejected actions |
 
 Every server → client payload is wrapped in the same envelope:
 ```json
 { "type": "MESSAGE_NEW", "timestamp": "...", "payload": { /* MessageResponse, ChannelMemberResponse, etc. */ } }
 ```
-`MessageResponse.topicId` is `null` for a general, topic-less message.
+`MessageResponse.topicId` is `null` for a general, topic-less message (and
+always `null` for group messages). `MessageResponse.chatType`
+(`CHANNEL`/`GROUP`/`DM`) and `chatId` tell you which stream a message
+belongs to — the same DTO shape is shared by both channel and group
+messages. `MessageResponse.status` is `PENDING` until
+`ScheduledMessageDispatcher` fires it, then `SENT`.
 
 ---
 
 ## 5. REST reference (non-realtime only)
+
+**core-service**
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -243,8 +385,40 @@ Every server → client payload is wrapped in the same envelope:
 | GET | `/api/channels/{id}/members` | member list & roles (US-10) |
 | GET | `/api/channels/{id}/messages?before=&limit=&topicId=` | paginated history (US-05, initial load); `topicId` omitted = unfiltered, a topic's UUID = that topic only, `none` = no-topic messages only |
 | DELETE | `/api/channels/{id}` | US-13, `OWNER` only |
+| POST | `/api/groups` | create a group (creator becomes `ADMIN`) |
+| GET | `/api/groups` | groups the caller belongs to |
+| GET | `/api/groups/{id}` | full detail: members |
+| GET | `/api/groups/{id}/messages?before=&limit=` | paginated history (group-equivalent of channel history) |
+| POST | `/api/groups/{id}/invites` | `ADMIN` only - invite a user (starts the accept/reject flow) |
+| POST | `/api/groups/invites/{id}/accept` | invitee only |
+| POST | `/api/groups/invites/{id}/reject` | invitee only |
+| GET | `/api/groups/invites/mine` | the caller's own pending invites, across every group |
+| POST | `/api/groups/{id}/members` | US-17 - `ADMIN` only; adds a user WITHOUT an invite, `403` if their privacy profile forbids it |
 
-Identity endpoints (`/api/auth/register|login|refresh|logout`) are
+**identity-service**
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/profiles/me` | the caller's own profile |
+| PATCH | `/api/profiles/me` | US-15 - edit `displayName`/`bio`/`avatarMediaId` |
+| PATCH | `/api/profiles/me/privacy` | US-17 - toggle `allowDirectGroupAdd` |
+
+**media-service**
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/media` (multipart) | upload a file, returns its `mediaId` |
+| GET | `/api/media/{id}` | file metadata |
+| GET | `/api/media/{id}/content` | streams the raw bytes - deliberately public, no JWT (see section 2) |
+
+**Internal, service-to-service only** (guarded by `X-Internal-Api-Key`, never called by the frontend)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/internal/profiles/{userId}/privacy` (identity-service) | US-17 - checked by core-service before a direct group add |
+| GET | `/internal/media/{mediaId}/exists` (media-service) | US-18 - checked by core-service before accepting a message's `mediaId` |
+
+Identity auth endpoints (`/api/auth/register|login|refresh|logout`) are
 unchanged from Sprint 1 — see the inline comments in
 `AuthController`/`AuthService` for details.
 
@@ -258,8 +432,11 @@ cd docker
 docker compose up --build
 ```
 Starts `identity-postgres` (`5432`), `identity-service` (`8081`),
-`core-postgres` (`5433`), and `core-service` (`8082`). Flyway
-migrates both services' schemas automatically on boot.
+`core-postgres` (`5433`), `core-service` (`8082`), `media-postgres`
+(`5434`), and `media-service` (`8083`). Flyway migrates all three services'
+schemas automatically on boot. `media-service`'s simulated storage
+(`LocalStorageServiceImpl`) persists to a named Docker volume
+(`media_files_data`) so uploads survive a container restart.
 
 ### Backend only (local Postgres, run each service in its own shell)
 ```bash
@@ -267,13 +444,27 @@ migrates both services' schemas automatically on boot.
 cd backend-services/identity-service
 export DB_HOST=localhost DB_USER=identity_user DB_PASSWORD=identity_pass DB_NAME=identity_db
 export JWT_SECRET=$(openssl rand -base64 48)
+export INTERNAL_API_KEY=$(openssl rand -base64 32)
 mvn spring-boot:run
 ```
 ```bash
-# core-service — MUST use the same JWT_SECRET as identity-service above
+# core-service — MUST use the same JWT_SECRET and INTERNAL_API_KEY as
+# identity-service and media-service
 cd backend-services/core-service
 export DB_HOST=localhost DB_PORT=5433 DB_USER=core_user DB_PASSWORD=core_pass DB_NAME=core_db
 export JWT_SECRET=<same value as identity-service's>
+export INTERNAL_API_KEY=<same value as identity-service's>
+export IDENTITY_SERVICE_BASE_URL=http://localhost:8081
+export MEDIA_SERVICE_BASE_URL=http://localhost:8083
+mvn spring-boot:run
+```
+```bash
+# media-service — MUST use the same JWT_SECRET and INTERNAL_API_KEY
+cd backend-services/media-service
+export DB_HOST=localhost DB_PORT=5434 DB_USER=media_user DB_PASSWORD=media_pass DB_NAME=media_db
+export JWT_SECRET=<same value as identity-service's>
+export INTERNAL_API_KEY=<same value as identity-service's>
+export MEDIA_STORAGE_ROOT=/tmp/datlor-media
 mvn spring-boot:run
 ```
 
@@ -283,10 +474,11 @@ cd frontend
 npm install
 npm run dev
 ```
-Vite proxies `/api/auth/*` → identity-service (`8081`), `/api/channels/*`
-and `/ws/*` (including the WebSocket upgrade) → core-service (`8082`)
-— see `vite.config.ts`. Set `VITE_API_BASE_URL` / `VITE_WS_URL` to override
-in production builds.
+Vite proxies `/api/auth/*` and `/api/profiles/*` → identity-service
+(`8081`), `/api/channels/*`, `/api/groups/*`, and `/ws/*` (including the
+WebSocket upgrade) → core-service (`8082`), and `/api/media/*` →
+media-service (`8083`) — see `vite.config.ts`. Set `VITE_API_BASE_URL` /
+`VITE_WS_URL` to override in production builds.
 
 ---
 
@@ -297,16 +489,33 @@ in production builds.
 | Variable | Default | Purpose |
 |---|---|---|
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `identity_db` / `identity_user` / `identity_pass` | Postgres connection |
-| `JWT_SECRET` | dev-only placeholder | HS256 signing key — **must** be a long random secret in production, and **must match core-service's** |
+| `JWT_SECRET` | dev-only placeholder | HS256 signing key — **must** be a long random secret in production, and **must match core-service's and media-service's** |
 | `JWT_ACCESS_EXP_MS` | `900000` (15 min) | Access token lifetime |
 | `JWT_REFRESH_EXP_MS` | `604800000` (7 days) | Refresh token lifetime |
+| `INTERNAL_API_KEY` | dev-only placeholder | Shared secret guarding `/internal/**` (US-17) — **must match core-service's** |
 
 **core-service**
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `core_db` / `core_user` / `core_pass` | Postgres connection (separate DB from identity-service) |
-| `JWT_SECRET` | dev-only placeholder | **Must exactly match** identity-service's — this service only validates, never signs |
+| `JWT_SECRET` | dev-only placeholder | **Must exactly match** identity-service's/media-service's — this service only validates, never signs |
+| `INTERNAL_API_KEY` | dev-only placeholder | **Must exactly match** identity-service's and media-service's — sent as `X-Internal-Api-Key` when calling their `/internal/**` endpoints |
+| `IDENTITY_SERVICE_BASE_URL` | `http://localhost:8081` | Base URL for the US-17 privacy check |
+| `MEDIA_SERVICE_BASE_URL` | `http://localhost:8083` | Base URL for the US-18 mediaId check |
+| `SCHEDULER_FIXED_DELAY_MS` | `5000` | How often `ScheduledMessageDispatcher` polls for due messages (US-19) |
+| `SCHEDULER_BATCH_SIZE` | `50` | Max due messages dispatched per poll |
+
+**media-service**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `media_db` / `media_user` / `media_pass` | Postgres connection (separate DB from identity-service/core-service) |
+| `JWT_SECRET` | dev-only placeholder | **Must exactly match** identity-service's/core-service's — this service only validates, never signs |
+| `INTERNAL_API_KEY` | dev-only placeholder | **Must exactly match** identity-service's and core-service's |
+| `MEDIA_STORAGE_ROOT` | `/tmp/datlor-media` | Where `LocalStorageServiceImpl` simulates object storage on disk |
+| `MEDIA_PUBLIC_BASE_URL` | `http://localhost:8083/api/media` | Base URL embedded in `MediaFile.fileUrl` |
+| `MEDIA_MAX_FILE_SIZE_BYTES` | `26214400` (25 MB) | Upload size cap |
 
 ---
 
@@ -348,3 +557,29 @@ in production builds.
 - Consider rate-limiting `/api/auth/login` and `/api/auth/register`, and a
   scheduled cleanup of expired/revoked `refresh_tokens` rows (see Sprint 1
   notes, still applicable).
+- **`/internal/**` protection is a shared-secret header, not network
+  isolation**: `InternalApiKeyFilter` (identity-service and media-service)
+  is a pragmatic in-code stand-in for what a real deployment would enforce
+  with a private network segment / service mesh / mTLS between services.
+  It's real protection against an internet-facing caller, but weaker than
+  true network isolation.
+- **Media validation is a live HTTP call on the hot path**: every message
+  with a `mediaId` makes a synchronous call to media-service before
+  persisting (US-18). This is correct and simple, but means a slow/down
+  media-service directly slows/blocks message sending; a busier system
+  might cache recent "exists" checks or accept eventual consistency instead
+  (e.g. optimistic accept + async validation that flags/retracts a bad
+  reference after the fact).
+- **No storage quota / cleanup**: media-service never deletes an uploaded
+  file once written, even if the message referencing it is later deleted
+  or edited - there's no garbage collection of orphaned uploads yet.
+- **Group ownership transfer / demoting the last ADMIN**: not implemented —
+  there's currently no protection against a group ending up with zero
+  ADMINs (e.g. if the sole admin were ever removed), mirroring the same
+  "ownership transfer is out of scope" simplification channels already
+  have, but slightly less enforced here since nothing currently prevents
+  the single-ADMIN invariant from being violated.
+- **No user directory / search**: inviting or direct-adding a group member
+  requires already knowing their `userId` (UUID) - there's no
+  search-by-email/name endpoint in identity-service yet, so the frontend's
+  invite UI takes a raw id rather than a picker.
