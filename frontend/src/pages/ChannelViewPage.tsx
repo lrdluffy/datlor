@@ -24,6 +24,7 @@ export function ChannelViewPage() {
     hasMoreHistory,
     loadOlderMessages,
     sendMessage,
+    myScheduledMessages,
   } = useChannelSession(channelId);
 
   useEffect(() => {
@@ -106,6 +107,11 @@ export function ChannelViewPage() {
             topics={channel.topics}
             topicFilterActive={selectedTopicId !== null}
           />
+          {myScheduledMessages.length > 0 && (
+            <p className="text-[11px] text-ink/40 px-4 pt-1">
+              🕒 {myScheduledMessages.length} پیام زمان‌بندی‌شده در انتظار ارسال
+            </p>
+          )}
           <MessageInput
             disabled={!canSend}
             disabledReason={disabledReason}
