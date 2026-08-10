@@ -71,4 +71,19 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * `topic_id is null` check on the FK column, without an actual join.
      */
     List<Message> findByChatIdAndTopicIdIsNull(UUID chatId);
+
+    /**
+     * US-19: the polling query behind ScheduledMessageDispatcher. Only
+     * ever looks at PENDING rows whose scheduled_at has arrived - matches
+     * the partial index on (scheduled_at) WHERE status = 'PENDING' from
+     * V4, so this stays fast regardless of how much SENT history piles up.
+     * Ordered oldest-due-first so a backlog is worked off in the order
+     * users actually scheduled it.
+     */
+    @Query("""
+            select m from Message m
+            where m.status = 'PENDING' and m.scheduledAt <= :now
+            order by m.scheduledAt asc
+            """)
+    List<Message> findDueScheduledMessages(@Param("now") LocalDateTime now, Pageable pageable);
 }
