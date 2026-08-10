@@ -36,11 +36,13 @@ services:
       DB_NAME: identity_db
       DB_USER: identity_user
       DB_PASSWORD: identity_pass
-      # MUST match core-service's JWT_SECRET below - identity-service
-      # signs tokens, core-service only validates them.
+      # MUST match core-service's/media-service's JWT_SECRET - identity-service
+      # signs tokens, the others only validate them.
       JWT_SECRET: change-me-in-production-to-a-long-random-secret
       JWT_ACCESS_EXP_MS: 900000
       JWT_REFRESH_EXP_MS: 604800000
+      # MUST match core-service's INTERNAL_API_KEY (US-17 privacy check).
+      INTERNAL_API_KEY: change-me-in-production-to-a-long-random-secret
     ports:
       - "8081:8081"
 
@@ -80,11 +82,69 @@ services:
       DB_NAME: core_db
       DB_USER: core_user
       DB_PASSWORD: core_pass
-      # MUST match identity-service's JWT_SECRET above.
+      # MUST match identity-service's/media-service's JWT_SECRET.
       JWT_SECRET: change-me-in-production-to-a-long-random-secret
+      # MUST match identity-service's and media-service's INTERNAL_API_KEY -
+      # US-17 (privacy check) and US-18 (mediaId validation) call these
+      # services' /internal/** endpoints directly, never their databases.
+      INTERNAL_API_KEY: change-me-in-production-to-a-long-random-secret
+      IDENTITY_SERVICE_BASE_URL: http://identity-service:8081
+      MEDIA_SERVICE_BASE_URL: http://media-service:8083
     ports:
       - "8082:8082"
+
+  # Separate Postgres instance for media-service, per the
+  # each-microservice-owns-its-own-database rule - media_files never gets
+  # a cross-DB FK from identity-service or core-service.
+  media-postgres:
+    image: postgres:16-alpine
+    container_name: media-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: media_db
+      POSTGRES_USER: media_user
+      POSTGRES_PASSWORD: media_pass
+    ports:
+      - "5434:5432"
+    volumes:
+      - media_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media_user -d media_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  media-service:
+    build:
+      context: ../backend-services/media-service
+      dockerfile: Dockerfile
+    container_name: media-service
+    restart: unless-stopped
+    depends_on:
+      media-postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: media-postgres
+      DB_PORT: 5432
+      DB_NAME: media_db
+      DB_USER: media_user
+      DB_PASSWORD: media_pass
+      # MUST match identity-service's/core-service's JWT_SECRET.
+      JWT_SECRET: change-me-in-production-to-a-long-random-secret
+      # MUST match core-service's INTERNAL_API_KEY (US-18 mediaId validation).
+      INTERNAL_API_KEY: change-me-in-production-to-a-long-random-secret
+      MEDIA_STORAGE_ROOT: /data/media
+      MEDIA_PUBLIC_BASE_URL: http://localhost:8083/api/media
+    ports:
+      - "8083:8083"
+    volumes:
+      # Simulated object store (see LocalStorageServiceImpl) - a real
+      # deployment would swap this for an S3/MinIO-backed StorageService
+      # and drop this volume entirely.
+      - media_files_data:/data/media
 
 volumes:
   identity_pg_data:
   core_pg_data:
+  media_pg_data:
+  media_files_data:
