@@ -13,7 +13,7 @@ public class UserMapper {
                 user.getId(),
                 user.getEmail(),
                 profile != null ? profile.getDisplayName() : null,
-                profile != null ? profile.getAvatarUrl() : null,
+                profile != null ? profile.getAvatarMediaId() : null,
                 user.getCreatedAt()
         );
     }

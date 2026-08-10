@@ -1,13 +1,12 @@
 package com.strawhats.identity.dto.response;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
-public record UserResponse(
-        UUID id,
-        String email,
+public record ProfileResponse(
+        UUID userId,
         String displayName,
+        String bio,
         UUID avatarMediaId,
-        LocalDateTime createdAt
+        boolean allowDirectGroupAdd
 ) {
 }
