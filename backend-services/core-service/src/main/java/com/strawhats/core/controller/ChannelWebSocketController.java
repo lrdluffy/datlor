@@ -11,10 +11,13 @@ import com.strawhats.core.dto.ws.WsErrorMessage;
 import com.strawhats.core.dto.ws.WsEvent;
 import com.strawhats.core.dto.ws.WsEventType;
 import com.strawhats.core.entity.ChannelMember;
+import com.strawhats.core.entity.enums.MessageStatus;
+import com.strawhats.core.exception.InvalidMediaException;
 import com.strawhats.core.exception.InvalidTopicException;
 import com.strawhats.core.exception.MemberBlockedException;
 import com.strawhats.core.exception.NotAChannelMemberException;
 import com.strawhats.core.exception.ResourceNotFoundException;
+import com.strawhats.core.exception.ServiceCommunicationException;
 import com.strawhats.core.exception.UnauthorizedActionException;
 import com.strawhats.core.mapper.ChannelMapper;
 import com.strawhats.core.security.StompPrincipal;
@@ -89,12 +92,23 @@ public class ChannelWebSocketController {
      * client focused on just that topic doesn't have to filter the
      * channel-wide firehose itself. The channel-wide broadcast always
      * happens too, topic or not, since that stream means "all messages".
+     *
+     * US-19: a SCHEDULED message (status=PENDING) is deliberately NOT
+     * broadcast here - it is only privately acknowledged to the sender on
+     * /user/queue/scheduled. ScheduledMessageDispatcher is the ONLY place
+     * that broadcasts a PENDING message, once it becomes due.
      */
     @MessageMapping("/messages.send")
     public void sendMessage(@Valid @Payload SendMessageRequest request, Principal principal) {
         MessageResponse response = messageService.sendMessage(userId(principal), request);
-        WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_NEW, response);
 
+        if (response.status() == MessageStatus.PENDING) {
+            messagingTemplate.convertAndSendToUser(
+                    principal.getName(), "/queue/scheduled", WsEvent.of(WsEventType.MESSAGE_SCHEDULED, response));
+            return;
+        }
+
+        WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_NEW, response);
         messagingTemplate.convertAndSend("/topic/channels/" + request.channelId(), event);
 
         if (response.topicId() != null) {
@@ -144,10 +158,16 @@ public class ChannelWebSocketController {
     }
 
     @MessageExceptionHandler({ValidationException.class, MethodArgumentNotValidException.class,
-            InvalidTopicException.class})
+            InvalidTopicException.class, InvalidMediaException.class})
     @SendToUser(destinations = "/queue/errors", broadcast = false)
     public WsErrorMessage handleValidation(Exception ex) {
         return WsErrorMessage.of("VALIDATION_ERROR", ex.getMessage());
+    }
+
+    @MessageExceptionHandler(ServiceCommunicationException.class)
+    @SendToUser(destinations = "/queue/errors", broadcast = false)
+    public WsErrorMessage handleServiceCommunication(ServiceCommunicationException ex) {
+        return WsErrorMessage.of("SERVICE_UNAVAILABLE", ex.getMessage());
     }
 
     @MessageExceptionHandler(Exception.class)
