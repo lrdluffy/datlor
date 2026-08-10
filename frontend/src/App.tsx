@@ -7,6 +7,9 @@ import { RegisterPage } from './pages/RegisterPage';
 import { ChannelListPage } from './pages/ChannelListPage';
 import { ChannelViewPage } from './pages/ChannelViewPage';
 import { ChannelSettingsPage } from './pages/ChannelSettingsPage';
+import { GroupListPage } from './pages/GroupListPage';
+import { GroupViewPage } from './pages/GroupViewPage';
+import { ProfileEditPage } from './pages/ProfileEditPage';
 
 export default function App() {
   return (
@@ -37,6 +40,30 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <ChannelSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/groups"
+              element={
+                <ProtectedRoute>
+                  <GroupListPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/groups/:groupId"
+              element={
+                <ProtectedRoute>
+                  <GroupViewPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile/edit"
+              element={
+                <ProtectedRoute>
+                  <ProfileEditPage />
                 </ProtectedRoute>
               }
             />
