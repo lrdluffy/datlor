@@ -10,6 +10,7 @@ public class MessageMapper {
     public MessageResponse toResponse(Message message) {
         return new MessageResponse(
                 message.getId(),
+                message.getChatType(),
                 message.getChatId(),
                 message.getSenderId(),
                 message.getType(),
@@ -17,6 +18,8 @@ public class MessageMapper {
                 message.getMediaId(),
                 message.getTopic() != null ? message.getTopic().getId() : null,
                 message.isEdited(),
+                message.getStatus(),
+                message.getScheduledAt(),
                 message.getCreatedAt()
         );
     }

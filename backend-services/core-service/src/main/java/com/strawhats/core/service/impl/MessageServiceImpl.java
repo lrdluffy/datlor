@@ -5,28 +5,21 @@ import com.strawhats.core.dto.response.MessageResponse;
 import com.strawhats.core.entity.Channel;
 import com.strawhats.core.entity.ChannelMember;
 import com.strawhats.core.entity.ChannelTopic;
-import com.strawhats.core.entity.Message;
-import com.strawhats.core.entity.SearchOutbox;
 import com.strawhats.core.entity.enums.ChatType;
-import com.strawhats.core.entity.enums.MessageType;
-import com.strawhats.core.entity.enums.OutboxOperation;
 import com.strawhats.core.exception.InvalidTopicException;
 import com.strawhats.core.exception.ResourceNotFoundException;
 import com.strawhats.core.mapper.MessageMapper;
 import com.strawhats.core.repository.ChannelRepository;
 import com.strawhats.core.repository.ChannelTopicRepository;
 import com.strawhats.core.repository.MessageRepository;
-import com.strawhats.core.repository.SearchOutboxRepository;
 import com.strawhats.core.service.MembershipService;
 import com.strawhats.core.service.MessageService;
-import jakarta.validation.ValidationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -35,24 +28,24 @@ public class MessageServiceImpl implements MessageService {
     private static final int MAX_HISTORY_PAGE_SIZE = 100;
 
     private final MessageRepository messageRepository;
-    private final SearchOutboxRepository searchOutboxRepository;
     private final ChannelRepository channelRepository;
     private final ChannelTopicRepository channelTopicRepository;
     private final MembershipService membershipService;
     private final MessageMapper messageMapper;
+    private final MessagePersistenceHelper messagePersistenceHelper;
 
     public MessageServiceImpl(MessageRepository messageRepository,
-                               SearchOutboxRepository searchOutboxRepository,
                                ChannelRepository channelRepository,
                                ChannelTopicRepository channelTopicRepository,
                                MembershipService membershipService,
-                               MessageMapper messageMapper) {
+                               MessageMapper messageMapper,
+                               MessagePersistenceHelper messagePersistenceHelper) {
         this.messageRepository = messageRepository;
-        this.searchOutboxRepository = searchOutboxRepository;
         this.channelRepository = channelRepository;
         this.channelTopicRepository = channelTopicRepository;
         this.membershipService = membershipService;
         this.messageMapper = messageMapper;
+        this.messagePersistenceHelper = messagePersistenceHelper;
     }
 
     @Override
@@ -64,40 +57,14 @@ public class MessageServiceImpl implements MessageService {
         ChannelMember sender = membershipService.requireMembership(channel.getId(), senderId);
         // Topic does NOT override channel permissions: this is the exact same
         // ACTIVE-membership check as before, regardless of whether the
-        // message is topic-tagged or general.
+        // message is topic-tagged, general, immediate, or scheduled.
         membershipService.requireCanSend(sender);
 
-        validateContent(request);
         ChannelTopic topic = resolveTopic(channel, request.topicId());
 
-        Message message = Message.builder()
-                .chatType(ChatType.CHANNEL)
-                .chatId(channel.getId())
-                .senderId(senderId)
-                .type(request.type())
-                .content(request.content())
-                .mediaId(request.mediaId())
-                .topic(topic)
-                .edited(false)
-                .build();
-        message = messageRepository.save(message);
-
-        // Transactional outbox: same DB transaction as the message insert above,
-        // so a future search-indexing consumer never misses or duplicates this event.
-        SearchOutbox outboxRow = SearchOutbox.builder()
-                .operation(OutboxOperation.CREATE)
-                .messageId(message.getId())
-                .payload(Map.of(
-                        "channelId", channel.getId().toString(),
-                        "senderId", senderId.toString(),
-                        "type", message.getType().name(),
-                        "topicId", topic != null ? topic.getId().toString() : "",
-                        "content", message.getContent() == null ? "" : message.getContent()
-                ))
-                .build();
-        searchOutboxRepository.save(outboxRow);
-
-        return messageMapper.toResponse(message);
+        return messagePersistenceHelper.persist(
+                ChatType.CHANNEL, channel.getId(), senderId, request.type(),
+                request.content(), request.mediaId(), topic, request.scheduledAt());
     }
 
     @Override
@@ -168,14 +135,5 @@ public class MessageServiceImpl implements MessageService {
 
     private int clampPageSize(int limit) {
         return Math.min(Math.max(limit, 1), MAX_HISTORY_PAGE_SIZE);
-    }
-
-    private void validateContent(SendMessageRequest request) {
-        if (request.type() == MessageType.TEXT && !request.hasContent()) {
-            throw new ValidationException("content is required for TEXT messages");
-        }
-        if ((request.type() == MessageType.IMAGE || request.type() == MessageType.FILE) && request.mediaId() == null) {
-            throw new ValidationException("mediaId is required for IMAGE/FILE messages");
-        }
     }
 }
