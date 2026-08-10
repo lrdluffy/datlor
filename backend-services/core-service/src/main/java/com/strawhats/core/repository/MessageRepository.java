@@ -25,7 +25,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             select m from Message m
             left join fetch m.topic
             where m.chatType = :chatType and m.chatId = :chatId
-              and (:before is null or m.createdAt < :before)
+            and m.createdAt < :before
             order by m.createdAt desc
             """)
     List<Message> findHistoryPage(@Param("chatType") ChatType chatType,
@@ -44,7 +44,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             select m from Message m
             left join fetch m.topic
             where m.chatType = :chatType and m.chatId = :chatId
-              and (:before is null or m.createdAt < :before)
+            and m.createdAt < :before
               and (
                 (:topicId is null and m.topic is null)
                 or (:topicId is not null and m.topic.id = :topicId)

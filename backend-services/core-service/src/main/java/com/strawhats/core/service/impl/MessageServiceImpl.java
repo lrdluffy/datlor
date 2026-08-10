@@ -77,9 +77,10 @@ public class MessageServiceImpl implements MessageService {
         membershipService.requireMembership(channelId, requestingUserId);
 
         int pageSize = clampPageSize(limit);
+        LocalDateTime effectiveBefore = before != null ? before : LocalDateTime.now();
 
         return messageRepository
-                .findHistoryPage(ChatType.CHANNEL, channelId, before, PageRequest.of(0, pageSize))
+                .findHistoryPage(ChatType.CHANNEL, channelId, effectiveBefore, PageRequest.of(0, pageSize))
                 .stream()
                 .map(messageMapper::toResponse)
                 .toList();
@@ -102,9 +103,10 @@ public class MessageServiceImpl implements MessageService {
         }
 
         int pageSize = clampPageSize(limit);
+        LocalDateTime effectiveBefore = before != null ? before : LocalDateTime.now();
 
         return messageRepository
-                .findTopicHistoryPage(ChatType.CHANNEL, channelId, topicId, before, PageRequest.of(0, pageSize))
+                .findTopicHistoryPage(ChatType.CHANNEL, channelId, topicId, effectiveBefore, PageRequest.of(0, pageSize))
                 .stream()
                 .map(messageMapper::toResponse)
                 .toList();
