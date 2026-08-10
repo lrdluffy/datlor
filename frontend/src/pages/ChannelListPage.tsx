@@ -28,7 +28,12 @@ export function ChannelListPage() {
         <h1 className="font-display font-semibold text-ink">کانال‌های من</h1>
         <div className="flex items-center gap-3">
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-400'}`} title={connected ? 'متصل' : 'در حال اتصال...'} />
-          <span className="text-sm text-ink/60">{user?.displayName ?? user?.email}</span>
+          <Link to="/groups" className="text-sm text-ink/60 hover:text-ink">
+            گروه‌ها
+          </Link>
+          <Link to="/profile/edit" className="text-sm text-ink/60 hover:text-ink">
+            {user?.displayName ?? user?.email}
+          </Link>
           <button onClick={logout} className="text-sm text-ink/60 hover:text-ink">
             خروج
           </button>
