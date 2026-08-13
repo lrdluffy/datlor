@@ -42,6 +42,31 @@ public class ChannelRestController {
         return ResponseEntity.ok(channelService.listChannelsForUser(userId));
     }
 
+    /**
+     * Search all channels by name, regardless of membership - `q` may be
+     * blank/omitted to browse recent channels. Each result's `viewerRole`
+     * is null for channels the caller hasn't joined yet, so the frontend
+     * can show "Join" vs "Open" without a second request.
+     */
+    @GetMapping("/search")
+    public ResponseEntity<List<ChannelResponse>> searchChannels(@RequestParam(required = false) String q,
+                                                                 Authentication authentication) {
+        UUID userId = currentUserId(authentication);
+        return ResponseEntity.ok(channelService.searchChannels(q, userId));
+    }
+
+    /**
+     * Self-service join found via search - no invite needed (channels have
+     * no private/invite-based tier, unlike groups). Broadcasts
+     * MEMBER_JOINED to /topic/channels/{channelId}/members.
+     */
+    @PostMapping("/{channelId}/join")
+    public ResponseEntity<ChannelMemberResponse> joinChannel(@PathVariable UUID channelId,
+                                                              Authentication authentication) {
+        UUID userId = currentUserId(authentication);
+        return ResponseEntity.ok(channelService.joinChannel(channelId, userId));
+    }
+
     /** Full channel detail (members + topics) - powers ChannelViewPage / settings. */
     @GetMapping("/{channelId}")
     public ResponseEntity<ChannelDetailResponse> getChannel(@PathVariable UUID channelId,
