@@ -8,4 +8,5 @@ html, body, #root {
 
 body {
   @apply bg-canvas text-ink font-body;
+  font-family: 'Vazirmatn', sans-serif;
 }
