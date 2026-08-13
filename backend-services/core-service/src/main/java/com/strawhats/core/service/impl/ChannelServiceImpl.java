@@ -1,6 +1,7 @@
 package com.strawhats.core.service.impl;
 
 import com.strawhats.core.dto.response.ChannelDetailResponse;
+import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
 import com.strawhats.core.dto.ws.WsEvent;
 import com.strawhats.core.dto.ws.WsEventType;
@@ -17,6 +18,7 @@ import com.strawhats.core.repository.ChannelRepository;
 import com.strawhats.core.repository.ChannelTopicRepository;
 import com.strawhats.core.service.ChannelService;
 import com.strawhats.core.service.MembershipService;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +33,9 @@ public class ChannelServiceImpl implements ChannelService {
 
     /** Default topic seeded on every new channel (matches the "# معرفی" tag shown in the wireframe). */
     private static final String DEFAULT_TOPIC_NAME = "معرفی";
+
+    /** Caps a single search request - this is an interactive-typeahead endpoint, not a full browse/paginate one. */
+    private static final int SEARCH_RESULT_LIMIT = 20;
 
     private final ChannelRepository channelRepository;
     private final ChannelMemberRepository channelMemberRepository;
@@ -90,6 +95,40 @@ public class ChannelServiceImpl implements ChannelService {
                     return channelMapper.toChannelResponse(channel, members.size(), viewerMembership);
                 })
                 .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ChannelResponse> searchChannels(String query, UUID requestingUserId) {
+        List<Channel> channels = channelRepository.searchActiveChannels(
+                query == null ? "" : query.trim(), PageRequest.of(0, SEARCH_RESULT_LIMIT));
+
+        return channels.stream()
+                .map(channel -> {
+                    List<ChannelMember> members = membershipService.listMembers(channel.getId());
+                    ChannelMember viewerMembership = members.stream()
+                            .filter(m -> m.getUserId().equals(requestingUserId))
+                            .findFirst()
+                            .orElse(null);
+                    return channelMapper.toChannelResponse(channel, members.size(), viewerMembership);
+                })
+                .toList();
+    }
+
+    @Override
+    @Transactional
+    public ChannelMemberResponse joinChannel(UUID channelId, UUID userId) {
+        Channel channel = channelRepository.findActiveById(channelId)
+                .orElseThrow(() -> new ResourceNotFoundException("Channel " + channelId + " was not found"));
+
+        ChannelMember membership = membershipService.joinChannel(channel, userId);
+        ChannelMemberResponse response = channelMapper.toMemberResponse(membership);
+
+        messagingTemplate.convertAndSend(
+                "/topic/channels/" + channelId + "/members",
+                WsEvent.of(WsEventType.MEMBER_JOINED, response));
+
+        return response;
     }
 
     @Override
