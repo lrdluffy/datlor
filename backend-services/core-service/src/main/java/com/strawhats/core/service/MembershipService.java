@@ -20,6 +20,16 @@ public interface MembershipService {
     /** Adds `userId` as the channel's sole OWNER. Used only at channel creation. */
     ChannelMember addOwner(Channel channel, UUID userId);
 
+    /**
+     * Self-service join (channel search & join): adds `userId` as a plain
+     * ACTIVE MEMBER. Idempotent - if the user is already an ACTIVE or
+     * RESTRICTED member, their existing membership is returned unchanged
+     * rather than erroring. A BLOCKED member cannot rejoin this way -
+     * throws MemberBlockedException, since self-service join must never
+     * be usable to route around an admin's block.
+     */
+    ChannelMember joinChannel(Channel channel, UUID userId);
+
     /** Returns the caller's own membership row, or throws if they never joined. */
     ChannelMember requireMembership(UUID channelId, UUID userId);
 

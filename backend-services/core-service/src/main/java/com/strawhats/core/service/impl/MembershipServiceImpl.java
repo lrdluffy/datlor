@@ -33,6 +33,22 @@ public class MembershipServiceImpl implements MembershipService {
     }
 
     @Override
+    @Transactional
+    public ChannelMember joinChannel(Channel channel, UUID userId) {
+        return channelMemberRepository.findByChannel_IdAndUserId(channel.getId(), userId)
+                .map(existing -> {
+                    if (existing.getStatus() == MemberStatus.BLOCKED) {
+                        throw new MemberBlockedException(
+                                "User " + userId + " is blocked from channel " + channel.getId());
+                    }
+                    // Already ACTIVE or RESTRICTED - joining again is a no-op.
+                    return existing;
+                })
+                .orElseGet(() -> channelMemberRepository.save(
+                        ChannelMember.create(channel, userId, ChannelRole.MEMBER)));
+    }
+
+    @Override
     public ChannelMember requireMembership(UUID channelId, UUID userId) {
         return channelMemberRepository.findByChannel_IdAndUserId(channelId, userId)
                 .orElseThrow(() -> new NotAChannelMemberException(
