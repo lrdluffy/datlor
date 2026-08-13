@@ -9,6 +9,24 @@ export const channelApi = {
     return data;
   },
 
+  /**
+   * Search all channels by name, regardless of membership - pass an empty
+   * string to browse recent channels. Each result's `viewerRole` is null
+   * for channels not yet joined.
+   */
+  searchChannels: async (query: string): Promise<ChannelResponse[]> => {
+    const { data } = await axiosClient.get<ChannelResponse[]>('/channels/search', {
+      params: { q: query || undefined },
+    });
+    return data;
+  },
+
+  /** Self-service join - no invite needed (channels have no private tier, unlike groups). */
+  joinChannel: async (channelId: string): Promise<ChannelMemberResponse> => {
+    const { data } = await axiosClient.post<ChannelMemberResponse>(`/channels/${channelId}/join`);
+    return data;
+  },
+
   getChannel: async (channelId: string): Promise<ChannelDetailResponse> => {
     const { data } = await axiosClient.get<ChannelDetailResponse>(`/channels/${channelId}`);
     return data;
