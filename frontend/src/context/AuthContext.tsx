@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useState } from
 import { authApi } from '../api/authApi';
 import { tokenStorage } from '../api/tokenStorage';
 import { LoginRequest, RegisterRequest, UserResponse } from '../types/auth';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthContextValue {
   user: UserResponse | null;
@@ -17,6 +18,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
 
   const register = useCallback(async (payload: RegisterRequest) => {
     setIsLoading(true);
@@ -49,6 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       tokenStorage.clear();
       setUser(null);
+      navigate("/");
     }
   }, []);
 
