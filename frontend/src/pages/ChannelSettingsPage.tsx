@@ -1,5 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+  X,
+  Settings,
+  Users,
+  Hash,
+  Trash2,
+  Loader2,
+  AlertCircle,
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useChannelSession } from '../hooks/useChannelSession';
 import { RoleManagementPanel } from '../components/RoleManagementPanel';
@@ -15,13 +24,23 @@ export function ChannelSettingsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center text-sm text-ink/50">در حال بارگذاری...</div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-accent/5 via-white to-fuchsia-50/40">
+        <p className="text-sm text-ink/50 inline-flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          در حال بارگذاری...
+        </p>
+      </div>
+    );
   }
 
   if (!channel) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-red-600">{error ?? 'کانال یافت نشد'}</p>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-accent/5 via-white to-fuchsia-50/40">
+        <p className="text-sm text-red-600 inline-flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          {error ?? 'کانال یافت نشد'}
+        </p>
       </div>
     );
   }
@@ -29,8 +48,11 @@ export function ChannelSettingsPage() {
   const myMembership = members.find((m) => m.userId === user?.id);
   if (!myMembership) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-red-600">شما عضو این کانال نیستید</p>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-accent/5 via-white to-fuchsia-50/40">
+        <p className="text-sm text-red-600 inline-flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          شما عضو این کانال نیستید
+        </p>
       </div>
     );
   }
@@ -52,23 +74,37 @@ export function ChannelSettingsPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-line bg-white px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Link to={`/channels/${channel.id}`} className="text-ink/40 hover:text-ink text-sm">
-            ×
-          </Link>
-          <h1 className="font-display font-semibold text-ink">#{channel.name} — تنظیمات</h1>
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-accent/5 via-white to-fuchsia-50/40">
+      <header className="sticky top-0 z-10 backdrop-blur-xl bg-white/80 border-b border-line px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent via-violet-600 to-fuchsia-600 flex items-center justify-center shadow-md shadow-accent/30">
+            <Settings className="w-4 h-4 text-white" />
+          </span>
+          <h1 className="font-display font-semibold text-ink">
+            #{channel.name} <span className="text-ink/40 font-normal">— تنظیمات</span>
+          </h1>
         </div>
+        <Link
+          to={`/channels/${channel.id}`}
+          className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-ink/40 hover:text-ink hover:bg-slate-100 transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </Link>
       </header>
 
       <main className="flex-1 max-w-2xl w-full mx-auto px-4 py-6">
         {error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4">{error}</p>
+          <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-4 inline-flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+            {error}
+          </p>
         )}
 
-        <h2 className="text-sm font-semibold text-ink/70 mb-2">اعضا</h2>
-        <div className="bg-white border border-line rounded-xl overflow-hidden mb-6">
+        <h2 className="text-sm font-semibold text-ink/70 mb-2 inline-flex items-center gap-1.5">
+          <Users className="w-3.5 h-3.5 text-accent/60" />
+          اعضا
+        </h2>
+        <div className="bg-white border-2 border-line rounded-xl overflow-hidden mb-6 shadow-sm">
           <RoleManagementPanel
             members={members}
             currentUserId={user?.id ?? ''}
@@ -80,10 +116,16 @@ export function ChannelSettingsPage() {
 
         {channel.topics.length > 0 && (
           <>
-            <h2 className="text-sm font-semibold text-ink/70 mb-2">تاپیک‌ها</h2>
+            <h2 className="text-sm font-semibold text-ink/70 mb-2 inline-flex items-center gap-1.5">
+              <Hash className="w-3.5 h-3.5 text-accent/60" />
+              تاپیک‌ها
+            </h2>
             <div className="flex flex-wrap gap-2 mb-6">
               {channel.topics.map((topic) => (
-                <span key={topic.id} className="text-xs bg-white border border-line rounded-full px-3 py-1 text-ink/70">
+                <span
+                  key={topic.id}
+                  className="text-xs bg-accent/5 border border-accent/20 rounded-full px-3 py-1 text-accent"
+                >
                   #{topic.name}
                 </span>
               ))}
@@ -92,14 +134,28 @@ export function ChannelSettingsPage() {
         )}
 
         {myMembership.role === 'OWNER' && (
-          <div className="border-t border-line pt-4">
+          <div className="border-2 border-red-100 bg-red-50/40 rounded-xl p-4">
+            <h2 className="text-sm font-semibold text-red-700 mb-1">منطقه خطر</h2>
+            <p className="text-xs text-red-600/70 mb-3">
+              حذف کانال غیرقابل بازگشت است و تمام پیام‌ها و اعضا را از بین می‌برد.
+            </p>
             {deleteError && <p className="text-xs text-red-600 mb-2">{deleteError}</p>}
             <button
               onClick={handleDelete}
               disabled={isDeleting}
-              className="text-sm text-red-600 border border-red-200 rounded-lg px-4 py-2 hover:bg-red-50 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-red-600 bg-white border-2 border-red-200 rounded-lg px-4 py-2 hover:bg-red-100 transition-colors disabled:opacity-50"
             >
-              {isDeleting ? 'در حال حذف...' : '🗑 حذف کانال'}
+              {isDeleting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  در حال حذف...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  حذف کانال
+                </>
+              )}
             </button>
           </div>
         )}
