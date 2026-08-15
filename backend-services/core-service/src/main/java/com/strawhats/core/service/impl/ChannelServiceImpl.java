@@ -3,6 +3,7 @@ package com.strawhats.core.service.impl;
 import com.strawhats.core.dto.response.ChannelDetailResponse;
 import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
+import com.strawhats.core.dto.response.ChannelTopicResponse;
 import com.strawhats.core.dto.ws.WsEvent;
 import com.strawhats.core.dto.ws.WsEventType;
 import com.strawhats.core.entity.Channel;
@@ -18,6 +19,7 @@ import com.strawhats.core.repository.ChannelRepository;
 import com.strawhats.core.repository.ChannelTopicRepository;
 import com.strawhats.core.service.ChannelService;
 import com.strawhats.core.service.MembershipService;
+import jakarta.validation.ValidationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -78,6 +80,34 @@ public class ChannelServiceImpl implements ChannelService {
         channelTopicRepository.save(defaultTopic);
 
         return channelMapper.toChannelResponse(channel, 1, owner);
+    }
+
+    @Override
+    @Transactional
+    public ChannelTopicResponse createTopic(UUID channelId, UUID actorUserId, String name) {
+        Channel channel = channelRepository.findActiveById(channelId)
+                .orElseThrow(() -> new ResourceNotFoundException("Channel " + channelId + " was not found"));
+
+        ChannelMember actor = membershipService.requireMembership(channelId, actorUserId);
+        // "Users who have access" - the same threshold MessageServiceImpl
+        // relies on to allow sending a message: ACTIVE only. RESTRICTED
+        // members are read-only by design, and BLOCKED members have no
+        // access at all, so neither may add a new topic.
+        membershipService.requireCanSend(actor);
+
+        String trimmedName = name.trim();
+        if (channelTopicRepository.existsByChannel_IdAndName(channelId, trimmedName)) {
+            throw new ValidationException("A topic named \"" + trimmedName + "\" already exists in this channel");
+        }
+
+        ChannelTopic topic = ChannelTopic.builder()
+                .channel(channel)
+                .name(trimmedName)
+                .createdBy(actorUserId)
+                .build();
+        topic = channelTopicRepository.save(topic);
+
+        return channelMapper.toTopicResponse(topic);
     }
 
     @Override

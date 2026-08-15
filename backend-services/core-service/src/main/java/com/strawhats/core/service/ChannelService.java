@@ -3,6 +3,7 @@ package com.strawhats.core.service;
 import com.strawhats.core.dto.response.ChannelDetailResponse;
 import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
+import com.strawhats.core.dto.response.ChannelTopicResponse;
 
 import java.util.List;
 import java.util.UUID;
@@ -11,6 +12,16 @@ public interface ChannelService {
 
     /** US-09: Create channel. The creator is added as OWNER and a default "معرفی" topic is seeded. */
     ChannelResponse createChannel(UUID creatorUserId, String name, String description);
+
+    /**
+     * Create an ADDITIONAL topic in an existing channel, beyond the default
+     * one seeded at creation. Any member with access (ACTIVE status - the
+     * same threshold {@link MembershipService#requireCanSend} already uses
+     * to gate sending a message) may create one; topic names must be
+     * unique within the channel (case-sensitive, matching the DB's
+     * UNIQUE(channel_id, name) constraint from V1).
+     */
+    ChannelTopicResponse createTopic(UUID channelId, UUID actorUserId, String name);
 
     /** Channels the given user currently belongs to (used by ChannelListPage). */
     List<ChannelResponse> listChannelsForUser(UUID userId);

@@ -29,6 +29,7 @@ export function ChannelViewPage() {
     editMessage,
     deleteMessage,
     myScheduledMessages,
+    createTopic,
   } = useChannelSession(channelId);
 
   useEffect(() => {
@@ -125,6 +126,8 @@ export function ChannelViewPage() {
             topics={channel.topics}
             selectedTopicId={selectedTopicId}
             onSelect={setSelectedTopicId}
+            onCreateTopic={createTopic}
+            canCreateTopic={canSend}
         />
 
         <div className="flex-1 flex overflow-hidden">

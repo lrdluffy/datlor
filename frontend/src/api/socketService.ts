@@ -5,6 +5,7 @@ import {
   ChannelCreatedEvent,
   ChannelTopicEvent,
   CreateChannelRequest,
+  CreateTopicRequest,
   GroupInviteEvent,
   GroupMembersTopicEvent,
   GroupTopicEvent,
@@ -151,6 +152,11 @@ class SocketService {
   /** US-09: Create channel. */
   createChannel(payload: CreateChannelRequest): void {
     this.publish('/app/channels.create', payload);
+  }
+
+  /** Create an additional topic beyond the default one seeded at channel creation. */
+  createTopic(payload: CreateTopicRequest): void {
+    this.publish('/app/channels.topics.create', payload);
   }
 
   /** US-04: Send message in a public channel. */

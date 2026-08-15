@@ -1,4 +1,4 @@
-import { ChannelMemberResponse, ChannelResponse } from './channel';
+import { ChannelMemberResponse, ChannelResponse, ChannelTopicResponse } from './channel';
 import { MessageResponse } from './message';
 import { GroupInviteResponse, GroupMemberResponse } from './group';
 
@@ -12,6 +12,7 @@ export type WsEventType =
     | 'MEMBER_JOINED'
     | 'MEMBER_ROLE_UPDATED'
     | 'MEMBER_STATUS_UPDATED'
+    | 'TOPIC_CREATED'
     | 'GROUP_MEMBER_JOINED'
     | 'GROUP_INVITE_CREATED'
     | 'GROUP_INVITE_ACCEPTED'
@@ -35,7 +36,12 @@ export type ChannelTopicEvent =
 
 export type GroupTopicEvent = WsEvent<MessageResponse>;
 
-export type MembersTopicEvent = WsEvent<ChannelMemberResponse>;
+/**
+ * TOPIC_CREATED shares this destination with the member events (see
+ * ChannelWebSocketController.createTopic) - "channel structural changes",
+ * not strictly member-only.
+ */
+export type MembersTopicEvent = WsEvent<ChannelMemberResponse> | WsEvent<ChannelTopicResponse>;
 export type GroupMembersTopicEvent = WsEvent<GroupMemberResponse>;
 
 export type ChannelCreatedEvent = WsEvent<ChannelResponse>;
@@ -61,4 +67,10 @@ export interface UpdateMemberStatusRequest {
   channelId: string;
   targetUserId: string;
   newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED';
+}
+
+/** Create an additional topic beyond the default one seeded at channel creation. */
+export interface CreateTopicRequest {
+  channelId: string;
+  name: string;
 }

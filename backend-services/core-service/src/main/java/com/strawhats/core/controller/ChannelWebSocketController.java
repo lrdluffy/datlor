@@ -79,6 +79,25 @@ public class ChannelWebSocketController {
     }
 
     /**
+     * Create an ADDITIONAL topic beyond the default one seeded at channel
+     * creation - see ChannelServiceImpl.createTopic for exactly who may do
+     * this and the per-channel name-uniqueness rule. Unlike channels.create
+     * (unicast-reply only, since nobody is subscribed to a channel that
+     * didn't exist a moment ago), other members ARE already viewing this
+     * existing channel, so this broadcasts the same way updateRole/
+     * blockMember do - to /topic/channels/{channelId}/members, the
+     * channel's general structural-changes stream (also used for
+     * MEMBER_JOINED and CHANNEL_DELETED).
+     */
+    @MessageMapping("/channels.topics.create")
+    public void createTopic(@Valid @Payload CreateTopicRequest request, Principal principal) {
+        ChannelTopicResponse response = channelService.createTopic(request.channelId(), userId(principal), request.name());
+
+        WsEvent<ChannelTopicResponse> event = WsEvent.of(WsEventType.TOPIC_CREATED, response);
+        messagingTemplate.convertAndSend("/topic/channels/" + request.channelId() + "/members", event);
+    }
+
+    /**
      * US-04: Send message in a public channel. THE canonical real-time
      * message path - broadcasts to every subscriber of
      * /topic/channels/{channelId}, which is also how US-05 (view messages

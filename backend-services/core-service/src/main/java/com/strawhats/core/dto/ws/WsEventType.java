@@ -27,6 +27,10 @@ public enum WsEventType {
     MEMBER_ROLE_UPDATED,
     MEMBER_STATUS_UPDATED,
 
+    // Create additional channel topic feature - broadcast on the same
+    // "channel structural changes" stream as the member events above.
+    TOPIC_CREATED,
+
     // /topic/groups/{groupId}/members
     GROUP_MEMBER_JOINED,
 

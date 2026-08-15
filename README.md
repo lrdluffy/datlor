@@ -52,6 +52,10 @@ rather than an empty scaffold.
 - US-20 — Edit a sent message: only the original sender may edit their own message (`messages.edited` flips to `true`)
 - US-21 — Delete a sent message: the sender OR a channel admin/moderator (MODERATOR+) / group ADMIN may delete it (soft delete, `messages.deleted_at`)
 - Both are real-time, multi-party STOMP actions (`/app/messages.edit`, `/app/messages.delete`, and the group equivalents) broadcasting `MESSAGE_UPDATED`/`MESSAGE_DELETED` — never exposed over REST, same as sending a message
+- Closes the gap the "Known simplifications" section used to call out: creating a topic beyond the default `"معرفی"` one seeded at channel creation is now exposed
+- Any member with access (ACTIVE status — the same threshold `MembershipService.requireCanSend` already uses to allow sending a message) may create one; topic names must be unique per channel (enforced by the DB's pre-existing `UNIQUE(channel_id, name)` constraint from V1, with a clean `ValidationException` pre-check)
+- Real-time STOMP action (`/app/channels.topics.create`), broadcasting `TOPIC_CREATED` to `/topic/channels/{channelId}/members` — the same "channel structural changes" stream already used for `MEMBER_JOINED`/`MEMBER_ROLE_UPDATED`/`MEMBER_STATUS_UPDATED`/`CHANNEL_DELETED` — so a topic pill appears live for every other member currently viewing the channel, unlike `channels.create` itself (unicast-only, since nobody is subscribed to a channel that didn't exist a moment ago)
+- Renaming/deleting a topic remains out of scope — only creation was requested
 
 ---
 
@@ -404,14 +408,19 @@ are never broadcast to the whole channel/group.
 |---|---|---|
 | `/ws/connect` | connect | SockJS-wrapped STOMP endpoint (also registered without SockJS for native WS clients) |
 | `/app/channels.create` | client → server | US-09 |
+| `/app/channels.topics.create` | client → server | Create an additional channel topic (see Sprint 6) |
 | `/app/messages.send` | client → server | US-04 (payload includes optional `topicId`, `mediaId`, `scheduledAt`) |
+| `/app/messages.edit` | client → server | Edit a sent channel message - sender only (see Sprint 5) |
+| `/app/messages.delete` | client → server | Delete a sent channel message - sender or channel admin/moderator (see Sprint 5) |
 | `/app/channels.updateRole` | client → server | US-11 |
 | `/app/channels.blockMember` | client → server | US-12 |
 | `/app/groups.messages.send` | client → server | Group-equivalent of `messages.send` (payload includes optional `mediaId`, `scheduledAt` - no `topicId`, groups have no topics) |
-| `/topic/channels/{channelId}` | server → clients | `MESSAGE_NEW` (all messages, any topic or none), `CHANNEL_DELETED` |
-| `/topic/channels/{channelId}/topics/{topicId}` | server → clients | `MESSAGE_NEW`, filtered to one topic — sent *in addition to* the channel-wide stream above whenever a message carries that `topicId` |
-| `/topic/channels/{channelId}/members` | server → clients | `MEMBER_ROLE_UPDATED`, `MEMBER_STATUS_UPDATED`, `CHANNEL_DELETED` |
-| `/topic/groups/{groupId}` | server → clients | `MESSAGE_NEW` for that group |
+| `/app/groups.messages.edit` | client → server | Group-equivalent of `messages.edit` - sender only |
+| `/app/groups.messages.delete` | client → server | Group-equivalent of `messages.delete` - sender or group ADMIN |
+| `/topic/channels/{channelId}` | server → clients | `MESSAGE_NEW`/`MESSAGE_UPDATED`/`MESSAGE_DELETED` (all messages, any topic or none), `CHANNEL_DELETED` |
+| `/topic/channels/{channelId}/topics/{topicId}` | server → clients | `MESSAGE_NEW`/`MESSAGE_UPDATED`/`MESSAGE_DELETED`, filtered to one topic — sent *in addition to* the channel-wide stream above whenever a message carries that `topicId` |
+| `/topic/channels/{channelId}/members` | server → clients | `MEMBER_ROLE_UPDATED`, `MEMBER_STATUS_UPDATED`, `CHANNEL_DELETED`, `TOPIC_CREATED` |
+| `/topic/groups/{groupId}` | server → clients | `MESSAGE_NEW`/`MESSAGE_UPDATED`/`MESSAGE_DELETED` for that group |
 | `/topic/groups/{groupId}/members` | server → clients | `GROUP_MEMBER_JOINED` (on invite-accept or direct-add) |
 | `/user/queue/channels` | server → creator only | `CHANNEL_CREATED` reply to `channels.create` |
 | `/user/queue/invites` | server → invitee (on create) or inviter (on accept/reject) | `GROUP_INVITE_CREATED`, `GROUP_INVITE_ACCEPTED`, `GROUP_INVITE_REJECTED` |
@@ -605,12 +614,11 @@ media-service (`8083`) — see `vite.config.ts`. Set `VITE_API_BASE_URL` /
 - **Ownership transfer**: intentionally out of scope — `updateRole`
   explicitly rejects any attempt to change the `OWNER`'s role or promote a
   new one, so every channel always has exactly one, immutable owner for now.
-- **Topic management**: creating/renaming/deleting *additional* topics
-  beyond the default "معرفی" one seeded at channel creation is not exposed
-  yet (no `POST /api/channels/{id}/topics` or WS equivalent) — the schema,
-  validation, and every messaging layer are already fully topic-aware and
-  ready for it, but the CRUD surface for topics themselves is a natural
-  next slice.
+- **Topic management**: creating a topic is now supported (see Sprint 6 above,
+  `POST`-equivalent WS action `/app/channels.topics.create`); renaming or
+  deleting an existing topic is still not exposed — a natural next slice,
+  and the schema/mapper/validation are already shaped for it the same way
+  creation was before this sprint.
 - Consider rate-limiting `/api/auth/login` and `/api/auth/register`, and a
   scheduled cleanup of expired/revoked `refresh_tokens` rows (see Sprint 1
   notes, still applicable).

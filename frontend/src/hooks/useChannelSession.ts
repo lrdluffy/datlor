@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { channelApi } from '../api/channelApi';
 import { socketService } from '../api/socketService';
 import { useSocket } from '../context/SocketContext';
-import { ChannelDetailResponse, ChannelMemberResponse, ChannelRole } from '../types/channel';
+import { ChannelDetailResponse, ChannelMemberResponse, ChannelRole, ChannelTopicResponse } from '../types/channel';
 import { MessageResponse, MessageType } from '../types/message';
 import { ChannelTopicEvent, MembersTopicEvent, WsErrorMessage } from '../types/ws';
 
@@ -57,6 +57,8 @@ interface UseChannelSessionResult {
   myScheduledMessages: MessageResponse[];
   updateRole: (targetUserId: string, newRole: ChannelRole) => void;
   updateMemberStatus: (targetUserId: string, newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED') => void;
+  /** "4.4 Create Channel": any member with access (ACTIVE status) may add a topic - enforced server-side too. */
+  createTopic: (name: string) => void;
 }
 
 /** Exported so pages/components can select the "no topic" filter without hardcoding the sentinel string. */
@@ -228,8 +230,21 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
     });
 
     const unsubMembers = socketService.subscribeToMembers(channelId, (event: MembersTopicEvent) => {
+      if (event.type === 'TOPIC_CREATED') {
+        // Shares this destination with the member events (see
+        // ChannelWebSocketController.createTopic) - "channel structural
+        // changes", not strictly member-only.
+        const topic = event.payload as ChannelTopicResponse;
+        setChannel((prev) => {
+          if (!prev) return prev;
+          if (prev.topics.some((t) => t.id === topic.id)) return prev; // de-dup own echo
+          return { ...prev, topics: [...prev.topics, topic] };
+        });
+        return;
+      }
+
       setMembers((prev) => {
-        const updated = event.payload;
+        const updated = event.payload as ChannelMemberResponse;
         const idx = prev.findIndex((m) => m.userId === updated.userId);
         if (idx === -1) return [...prev, updated];
         const next = [...prev];
@@ -377,6 +392,14 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
       [channelId]
   );
 
+  const createTopic = useCallback(
+      (name: string) => {
+        if (!channelId) return;
+        socketService.createTopic({ channelId, name });
+      },
+      [channelId]
+  );
+
   const bucketIsLoading = !currentBucket.initialized;
 
   return {
@@ -396,5 +419,6 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
     myScheduledMessages,
     updateRole,
     updateMemberStatus,
+    createTopic,
   };
 }
