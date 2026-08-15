@@ -1,5 +1,7 @@
 package com.strawhats.core.service;
 
+import com.strawhats.core.dto.request.DeleteMessageRequest;
+import com.strawhats.core.dto.request.EditMessageRequest;
 import com.strawhats.core.dto.request.SendMessageRequest;
 import com.strawhats.core.dto.response.MessageResponse;
 
@@ -15,6 +17,21 @@ public interface MessageService {
      * to broadcast on /topic/channels/{channelId}. Never exposed over REST.
      */
     MessageResponse sendMessage(UUID senderId, SendMessageRequest request);
+
+    /**
+     * Edit a previously sent channel message. Only the original sender may
+     * edit their own message. Real-time, multi-party event (broadcasts
+     * MESSAGE_UPDATED) - never exposed over REST, same as sendMessage.
+     */
+    MessageResponse editMessage(UUID actingUserId, EditMessageRequest request);
+
+    /**
+     * Delete a previously sent channel message (soft delete). Allowed for
+     * the message's own sender OR a channel admin/moderator (MODERATOR and
+     * above - the same threshold US-12 uses for block/restrict). Broadcasts
+     * MESSAGE_DELETED - never exposed over REST.
+     */
+    MessageResponse deleteMessage(UUID actingUserId, DeleteMessageRequest request);
 
     /**
      * US-05: View channel messages in real time - this loads the initial

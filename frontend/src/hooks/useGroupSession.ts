@@ -18,6 +18,10 @@ interface UseGroupSessionResult {
   hasMoreHistory: boolean;
   loadOlderMessages: () => Promise<void>;
   sendMessage: (submission: MessageComposerSubmission) => void;
+  /** Only the sender may edit their own message - enforced server-side; this just sends the request. */
+  editMessage: (messageId: string, content: string) => void;
+  /** The sender or a group ADMIN may delete - enforced server-side. */
+  deleteMessage: (messageId: string) => void;
   myScheduledMessages: MessageResponse[];
 }
 
@@ -46,21 +50,21 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
     setError(null);
 
     Promise.all([groupApi.getGroup(groupId), groupApi.getHistory(groupId)])
-      .then(([detail, history]) => {
-        if (cancelled) return;
-        setGroup(detail);
-        setMembers(detail.members);
-        const chronological = [...history].reverse();
-        setMessages(chronological);
-        oldestLoadedAt.current = history.length > 0 ? history[history.length - 1].createdAt : undefined;
-        setHasMoreHistory(history.length >= HISTORY_PAGE_SIZE);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err?.response?.data?.message ?? 'Failed to load group');
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
+        .then(([detail, history]) => {
+          if (cancelled) return;
+          setGroup(detail);
+          setMembers(detail.members);
+          const chronological = [...history].reverse();
+          setMessages(chronological);
+          oldestLoadedAt.current = history.length > 0 ? history[history.length - 1].createdAt : undefined;
+          setHasMoreHistory(history.length >= HISTORY_PAGE_SIZE);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err?.response?.data?.message ?? 'Failed to load group');
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoading(false);
+        });
 
     return () => {
       cancelled = true;
@@ -73,6 +77,12 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
     const unsubGroup = socketService.subscribeToGroup(groupId, (event: GroupTopicEvent) => {
       if (event.type === 'MESSAGE_NEW') {
         setMessages((prev) => [...prev, event.payload]);
+      } else if (event.type === 'MESSAGE_UPDATED') {
+        const message = event.payload;
+        setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)));
+      } else if (event.type === 'MESSAGE_DELETED') {
+        const message = event.payload;
+        setMessages((prev) => prev.filter((m) => m.id !== message.id));
       }
     });
 
@@ -116,17 +126,33 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
   }, [groupId, hasMoreHistory]);
 
   const sendMessage = useCallback(
-    (submission: MessageComposerSubmission) => {
-      if (!groupId) return;
-      socketService.sendGroupMessage({
-        groupId,
-        type: submission.type,
-        content: submission.content,
-        mediaId: submission.mediaId,
-        scheduledAt: submission.scheduledAt,
-      });
-    },
-    [groupId]
+      (submission: MessageComposerSubmission) => {
+        if (!groupId) return;
+        socketService.sendGroupMessage({
+          groupId,
+          type: submission.type,
+          content: submission.content,
+          mediaId: submission.mediaId,
+          scheduledAt: submission.scheduledAt,
+        });
+      },
+      [groupId]
+  );
+
+  const editMessage = useCallback(
+      (messageId: string, content: string) => {
+        if (!groupId) return;
+        socketService.editGroupMessage({ groupId, messageId, content });
+      },
+      [groupId]
+  );
+
+  const deleteMessage = useCallback(
+      (messageId: string) => {
+        if (!groupId) return;
+        socketService.deleteGroupMessage({ groupId, messageId });
+      },
+      [groupId]
   );
 
   return {
@@ -138,6 +164,8 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
     hasMoreHistory,
     loadOlderMessages,
     sendMessage,
+    editMessage,
+    deleteMessage,
     myScheduledMessages,
   };
 }

@@ -18,6 +18,8 @@ export interface MessageResponse {
   /** null for an immediate message; set for a scheduled one (US-19). */
   scheduledAt: string | null;
   createdAt: string;
+  /** Non-null once the message has been deleted (soft delete) - see the MESSAGE_DELETED WS event. */
+  deletedAt: string | null;
 }
 
 export interface SendMessageRequest {
@@ -31,6 +33,19 @@ export interface SendMessageRequest {
   scheduledAt?: string;
 }
 
+/** Only the original sender may ever edit their own message - enforced server-side. */
+export interface EditMessageRequest {
+  channelId: string;
+  messageId: string;
+  content: string;
+}
+
+/** Allowed for the message's own sender OR a channel admin/moderator (MODERATOR+) - enforced server-side. */
+export interface DeleteMessageRequest {
+  channelId: string;
+  messageId: string;
+}
+
 export interface GroupMessageRequest {
   groupId: string;
   type: MessageType;
@@ -38,4 +53,17 @@ export interface GroupMessageRequest {
   mediaId?: string;
   /** US-19: a future ISO timestamp defers delivery; omit (or past/now) sends immediately. */
   scheduledAt?: string;
+}
+
+/** Group-equivalent of {@link EditMessageRequest}. */
+export interface EditGroupMessageRequest {
+  groupId: string;
+  messageId: string;
+  content: string;
+}
+
+/** Group-equivalent of {@link DeleteMessageRequest} - privileged actor here is a group ADMIN. */
+export interface DeleteGroupMessageRequest {
+  groupId: string;
+  messageId: string;
 }

@@ -20,7 +20,8 @@ public class MessageMapper {
                 message.isEdited(),
                 message.getStatus(),
                 message.getScheduledAt(),
-                message.getCreatedAt()
+                message.getCreatedAt(),
+                message.getDeletedAt()
         );
     }
 }

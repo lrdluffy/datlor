@@ -1,10 +1,13 @@
 package com.strawhats.core.service.impl;
 
+import com.strawhats.core.dto.request.DeleteMessageRequest;
+import com.strawhats.core.dto.request.EditMessageRequest;
 import com.strawhats.core.dto.request.SendMessageRequest;
 import com.strawhats.core.dto.response.MessageResponse;
 import com.strawhats.core.entity.Channel;
 import com.strawhats.core.entity.ChannelMember;
 import com.strawhats.core.entity.ChannelTopic;
+import com.strawhats.core.entity.enums.ChannelRole;
 import com.strawhats.core.entity.enums.ChatType;
 import com.strawhats.core.exception.InvalidTopicException;
 import com.strawhats.core.exception.ResourceNotFoundException;
@@ -66,6 +69,41 @@ public class MessageServiceImpl implements MessageService {
                 ChatType.CHANNEL, channel.getId(), senderId, request.type(),
                 request.content(), request.mediaId(), topic, request.scheduledAt());
     }
+
+    @Override
+    @Transactional
+    public MessageResponse editMessage(UUID actingUserId, EditMessageRequest request) {
+        Channel channel = channelRepository.findActiveById(request.channelId())
+                .orElseThrow(() -> new ResourceNotFoundException("Channel " + request.channelId() + " was not found"));
+
+        // Membership is required to act on the channel at all; the ACTUAL
+        // "only the sender may edit" rule is enforced inside
+        // MessagePersistenceHelper.editMessage, since being a member (even
+        // OWNER) grants no exception to edit someone else's message.
+        membershipService.requireMembership(channel.getId(), actingUserId);
+
+        return messagePersistenceHelper.editMessage(
+                ChatType.CHANNEL, channel.getId(), request.messageId(), actingUserId, request.content());
+    }
+
+    @Override
+    @Transactional
+    public MessageResponse deleteMessage(UUID actingUserId, DeleteMessageRequest request) {
+        Channel channel = channelRepository.findActiveById(request.channelId())
+                .orElseThrow(() -> new ResourceNotFoundException("Channel " + request.channelId() + " was not found"));
+
+        ChannelMember actor = membershipService.requireMembership(channel.getId(), actingUserId);
+
+        // A channel admin/moderator (MODERATOR and above) may delete
+        // anyone's message; everyone else may only delete their own - the
+        // final call on "own vs privileged" is made inside
+        // MessagePersistenceHelper.deleteMessage.
+        boolean canModerate = actor.getRole().isAtLeast(ChannelRole.MODERATOR);
+
+        return messagePersistenceHelper.deleteMessage(
+                ChatType.CHANNEL, channel.getId(), request.messageId(), actingUserId, canModerate);
+    }
+
 
     @Override
     @Transactional(readOnly = true)

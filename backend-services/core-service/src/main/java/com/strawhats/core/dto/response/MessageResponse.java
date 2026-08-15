@@ -25,6 +25,9 @@ public record MessageResponse(
         boolean edited,
         MessageStatus status,
         LocalDateTime scheduledAt,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+
+        /** Non-null once the message has been deleted (soft delete) - see the MESSAGE_DELETED WS event. */
+        LocalDateTime deletedAt
 ) {
 }

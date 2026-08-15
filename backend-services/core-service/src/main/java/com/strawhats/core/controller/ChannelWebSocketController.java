@@ -1,9 +1,6 @@
 package com.strawhats.core.controller;
 
-import com.strawhats.core.dto.request.CreateChannelRequest;
-import com.strawhats.core.dto.request.SendMessageRequest;
-import com.strawhats.core.dto.request.UpdateMemberStatusRequest;
-import com.strawhats.core.dto.request.UpdateRoleRequest;
+import com.strawhats.core.dto.request.*;
 import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
 import com.strawhats.core.dto.response.MessageResponse;
@@ -109,6 +106,46 @@ public class ChannelWebSocketController {
         }
 
         WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_NEW, response);
+        messagingTemplate.convertAndSend("/topic/channels/" + request.channelId(), event);
+
+        if (response.topicId() != null) {
+            messagingTemplate.convertAndSend(
+                    "/topic/channels/" + request.channelId() + "/topics/" + response.topicId(), event);
+        }
+    }
+
+    /**
+     * Edit a previously sent channel message. Only the original sender may
+     * ever edit their own message (see MessagePersistenceHelper.editMessage).
+     * Broadcasts MESSAGE_UPDATED the same way sendMessage broadcasts
+     * MESSAGE_NEW - channel-wide, plus the topic-scoped stream too when the
+     * message carries a topicId.
+     */
+    @MessageMapping("/messages.edit")
+    public void editMessage(@Valid @Payload EditMessageRequest request, Principal principal) {
+        MessageResponse response = messageService.editMessage(userId(principal), request);
+
+        WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_UPDATED, response);
+        messagingTemplate.convertAndSend("/topic/channels/" + request.channelId(), event);
+
+        if (response.topicId() != null) {
+            messagingTemplate.convertAndSend(
+                    "/topic/channels/" + request.channelId() + "/topics/" + response.topicId(), event);
+        }
+    }
+
+    /**
+     * Delete a previously sent channel message (soft delete). Allowed for
+     * the message's own sender OR a channel admin/moderator - see
+     * MessageServiceImpl.deleteMessage for the exact role threshold.
+     * Broadcasts MESSAGE_DELETED the same way sendMessage broadcasts
+     * MESSAGE_NEW.
+     */
+    @MessageMapping("/messages.delete")
+    public void deleteMessage(@Valid @Payload DeleteMessageRequest request, Principal principal) {
+        MessageResponse response = messageService.deleteMessage(userId(principal), request);
+
+        WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_DELETED, response);
         messagingTemplate.convertAndSend("/topic/channels/" + request.channelId(), event);
 
         if (response.topicId() != null) {

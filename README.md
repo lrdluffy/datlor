@@ -47,6 +47,12 @@ Four sprints implemented against `SD_PROJ.pdf`:
 `media-service` is now a fully implemented microservice (see section 2 below)
 rather than an empty scaffold.
 
+**Sprint 5 — edit & delete a sent message**
+
+- US-20 — Edit a sent message: only the original sender may edit their own message (`messages.edited` flips to `true`)
+- US-21 — Delete a sent message: the sender OR a channel admin/moderator (MODERATOR+) / group ADMIN may delete it (soft delete, `messages.deleted_at`)
+- Both are real-time, multi-party STOMP actions (`/app/messages.edit`, `/app/messages.delete`, and the group equivalents) broadcasting `MESSAGE_UPDATED`/`MESSAGE_DELETED` — never exposed over REST, same as sending a message
+
 ---
 
 ## 1. Architecture at a glance
@@ -257,6 +263,57 @@ committed, so a client can never see a `MESSAGE_NEW` event for a status
 update that then failed to persist. From a receiving client's point of
 view, a dispatched scheduled message is indistinguishable from one sent
 immediately — it just arrived later.
+
+### US-20/US-21 — Edit & delete a sent message
+`messages` gained `deleted_at` (nullable `TIMESTAMP`, V6) alongside the
+`edited` flag that already existed from V2 - the same soft-delete pattern
+already used for `channels.deleted_at`: the row and its content are kept
+for audit, only the read paths stop surfacing it once set.
+
+Both actions are modeled as **STOMP**, not REST, same as sending a
+message itself - editing/deleting is just as real-time and multi-party as
+sending (every viewer's screen must update immediately), so
+`/app/messages.edit` / `/app/messages.delete` (channels) and
+`/app/groups.messages.edit` / `/app/groups.messages.delete` (groups) join
+`/app/messages.send` / `/app/groups.messages.send` as the only ways to
+mutate a message - there is still no REST endpoint for any message
+mutation.
+
+- **Edit**: `MessagePersistenceHelper.editMessage` enforces that ONLY the
+  original sender may ever edit their own message - no admin/moderator
+  exception, unlike delete. Sets `content` and flips `edited = true`,
+  then broadcasts `MESSAGE_UPDATED` (full `MessageResponse`) to the same
+  destination(s) `MESSAGE_NEW` would have gone to (channel-wide, plus the
+  topic-scoped stream too when the message carries a `topicId`; group-wide
+  for groups).
+- **Delete**: `MessagePersistenceHelper.deleteMessage` allows the sender
+  OR a "privileged" actor, where privilege is decided by the caller before
+  reaching the shared helper: `MessageServiceImpl` requires the actor's
+  channel role be `MODERATOR` or above (the exact same threshold US-12
+  uses for block/restrict); `GroupMessageServiceImpl` requires `GroupRole
+  .ADMIN` (groups have no moderator tier, per "Groups ≠ Channels"). Sets
+  `deleted_at = now()` and broadcasts `MESSAGE_DELETED` the same way.
+- **Guard against US-19 interaction**: a still-`PENDING` scheduled
+  message cannot be edited or deleted through these actions
+  (`MessagePersistenceHelper.requireLiveMessage` rejects it with
+  `VALIDATION_ERROR`) - editing/deleting it here would race with
+  `ScheduledMessageDispatcher`, which polls by `status = 'PENDING'` alone
+  and knows nothing about either action.
+- **History filtering**: `MessageRepository.findHistoryPage` and
+  `findTopicHistoryPage` (the two queries actually used by REST history
+  and the initial channel/group load) now exclude `deletedAt is not
+  null` rows, mirroring `ChannelRepository.findActiveById`. Both
+  transactional-outbox writes (`UPDATE`/`DELETE` operations) reuse the
+  same `search_outbox` table as `CREATE`, in the same DB transaction as
+  the message mutation.
+- **Frontend**: `MessageList` shows an edit (✎) action only on the
+  viewer's own messages, and a delete (🗑) action on the viewer's own
+  messages OR any message when the viewer is a channel MODERATOR+/OWNER/
+  MANAGER or a group ADMIN. `useChannelSession`/`useGroupSession` handle
+  `MESSAGE_UPDATED` by replacing the message in place (in every bucket
+  that currently holds it) and `MESSAGE_DELETED` by removing it from
+  every bucket - a deleted message simply disappears from the timeline,
+  same as how a deleted channel disappears from the channel list.
 
 ### Group schema (`groups`, `group_members`, `group_invites`)
 Deliberately isolated from the channel schema — nothing in `groups.sql`

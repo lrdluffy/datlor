@@ -3,17 +3,19 @@ import { MessageResponse } from './message';
 import { GroupInviteResponse, GroupMemberResponse } from './group';
 
 export type WsEventType =
-  | 'MESSAGE_NEW'
-  | 'CHANNEL_DELETED'
-  | 'MESSAGE_SCHEDULED'
-  | 'CHANNEL_CREATED'
-  | 'MEMBER_JOINED'
-  | 'MEMBER_ROLE_UPDATED'
-  | 'MEMBER_STATUS_UPDATED'
-  | 'GROUP_MEMBER_JOINED'
-  | 'GROUP_INVITE_CREATED'
-  | 'GROUP_INVITE_ACCEPTED'
-  | 'GROUP_INVITE_REJECTED';
+    | 'MESSAGE_NEW'
+    | 'MESSAGE_UPDATED'
+    | 'MESSAGE_DELETED'
+    | 'CHANNEL_DELETED'
+    | 'MESSAGE_SCHEDULED'
+    | 'CHANNEL_CREATED'
+    | 'MEMBER_JOINED'
+    | 'MEMBER_ROLE_UPDATED'
+    | 'MEMBER_STATUS_UPDATED'
+    | 'GROUP_MEMBER_JOINED'
+    | 'GROUP_INVITE_CREATED'
+    | 'GROUP_INVITE_ACCEPTED'
+    | 'GROUP_INVITE_REJECTED';
 
 export interface WsEvent<T> {
   type: WsEventType;
@@ -28,8 +30,8 @@ export interface WsErrorMessage {
 }
 
 export type ChannelTopicEvent =
-  | WsEvent<MessageResponse>
-  | WsEvent<{ channelId: string }>;
+    | WsEvent<MessageResponse>
+    | WsEvent<{ channelId: string }>;
 
 export type GroupTopicEvent = WsEvent<MessageResponse>;
 

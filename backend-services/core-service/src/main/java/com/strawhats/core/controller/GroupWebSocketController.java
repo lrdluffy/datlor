@@ -1,15 +1,14 @@
 package com.strawhats.core.controller;
 
+import com.strawhats.core.dto.request.DeleteGroupMessageRequest;
+import com.strawhats.core.dto.request.EditGroupMessageRequest;
 import com.strawhats.core.dto.request.GroupMessageRequest;
 import com.strawhats.core.dto.response.MessageResponse;
 import com.strawhats.core.dto.ws.WsErrorMessage;
 import com.strawhats.core.dto.ws.WsEvent;
 import com.strawhats.core.dto.ws.WsEventType;
 import com.strawhats.core.entity.enums.MessageStatus;
-import com.strawhats.core.exception.InvalidMediaException;
-import com.strawhats.core.exception.NotAGroupMemberException;
-import com.strawhats.core.exception.ResourceNotFoundException;
-import com.strawhats.core.exception.ServiceCommunicationException;
+import com.strawhats.core.exception.*;
 import com.strawhats.core.security.StompPrincipal;
 import com.strawhats.core.service.GroupMessageService;
 import jakarta.validation.Valid;
@@ -68,14 +67,42 @@ public class GroupWebSocketController {
         messagingTemplate.convertAndSend("/topic/groups/" + request.groupId(), event);
     }
 
+    /**
+     * Edit a previously sent group message. Only the original sender may
+     * ever edit their own message (see MessagePersistenceHelper.editMessage).
+     * Broadcasts MESSAGE_UPDATED to /topic/groups/{groupId}, mirroring how
+     * sendMessage broadcasts MESSAGE_NEW.
+     */
+    @MessageMapping("/groups.messages.edit")
+    public void editMessage(@Valid @Payload EditGroupMessageRequest request, Principal principal) {
+        MessageResponse response = groupMessageService.editMessage(userId(principal), request);
+
+        WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_UPDATED, response);
+        messagingTemplate.convertAndSend("/topic/groups/" + request.groupId(), event);
+    }
+
+    /**
+     * Delete a previously sent group message (soft delete). Allowed for the
+     * message's own sender OR a group ADMIN - see
+     * GroupMessageServiceImpl.deleteMessage. Broadcasts MESSAGE_DELETED to
+     * /topic/groups/{groupId}.
+     */
+    @MessageMapping("/groups.messages.delete")
+    public void deleteMessage(@Valid @Payload DeleteGroupMessageRequest request, Principal principal) {
+        MessageResponse response = groupMessageService.deleteMessage(userId(principal), request);
+
+        WsEvent<MessageResponse> event = WsEvent.of(WsEventType.MESSAGE_DELETED, response);
+        messagingTemplate.convertAndSend("/topic/groups/" + request.groupId(), event);
+    }
+
     // ---------------------------------------------------------------
     // Error handling: every rejection here is unicast to the offending
     // client's own /user/queue/errors, never broadcast to the group.
     // ---------------------------------------------------------------
 
-    @MessageExceptionHandler(NotAGroupMemberException.class)
+    @MessageExceptionHandler({NotAGroupMemberException.class, UnauthorizedActionException.class})
     @SendToUser(destinations = "/queue/errors", broadcast = false)
-    public WsErrorMessage handleForbidden(NotAGroupMemberException ex) {
+    public WsErrorMessage handleForbidden(RuntimeException ex) {
         return WsErrorMessage.of("FORBIDDEN", ex.getMessage());
     }
 

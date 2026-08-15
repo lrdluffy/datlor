@@ -1,11 +1,14 @@
 package com.strawhats.core.service.impl;
 
+import com.strawhats.core.dto.request.DeleteGroupMessageRequest;
+import com.strawhats.core.dto.request.EditGroupMessageRequest;
 import com.strawhats.core.dto.request.GroupMessageRequest;
 import com.strawhats.core.dto.response.MessageResponse;
 import com.strawhats.core.entity.Group;
 import com.strawhats.core.entity.GroupMember;
 import com.strawhats.core.entity.enums.ChatType;
 import com.strawhats.core.entity.enums.GroupMemberStatus;
+import com.strawhats.core.entity.enums.GroupRole;
 import com.strawhats.core.exception.NotAGroupMemberException;
 import com.strawhats.core.exception.ResourceNotFoundException;
 import com.strawhats.core.mapper.MessageMapper;
@@ -59,6 +62,40 @@ public class GroupMessageServiceImpl implements GroupMessageService {
     }
 
     @Override
+    @Transactional
+    public MessageResponse editMessage(UUID actingUserId, EditGroupMessageRequest request) {
+        Group group = groupRepository.findById(request.groupId())
+                .orElseThrow(() -> new ResourceNotFoundException("Group " + request.groupId() + " was not found"));
+
+        // Membership is required to act on the group at all; the ACTUAL
+        // "only the sender may edit" rule is enforced inside
+        // MessagePersistenceHelper.editMessage - being ADMIN grants no
+        // exception to edit someone else's message.
+        requireActiveMember(group.getId(), actingUserId);
+
+        return messagePersistenceHelper.editMessage(
+                ChatType.GROUP, group.getId(), request.messageId(), actingUserId, request.content());
+    }
+
+    @Override
+    @Transactional
+    public MessageResponse deleteMessage(UUID actingUserId, DeleteGroupMessageRequest request) {
+        Group group = groupRepository.findById(request.groupId())
+                .orElseThrow(() -> new ResourceNotFoundException("Group " + request.groupId() + " was not found"));
+
+        GroupMember actor = requireActiveMember(group.getId(), actingUserId);
+
+        // Groups only distinguish ADMIN from MEMBER (no moderator tier,
+        // per "Groups ≠ Channels") - an ADMIN may delete anyone's message;
+        // everyone else may only delete their own.
+        boolean canModerate = actor.getRole() == GroupRole.ADMIN;
+
+        return messagePersistenceHelper.deleteMessage(
+                ChatType.GROUP, group.getId(), request.messageId(), actingUserId, canModerate);
+    }
+
+
+    @Override
     @Transactional(readOnly = true)
     public List<MessageResponse> getHistory(UUID groupId, UUID requestingUserId, LocalDateTime before, int limit) {
         groupRepository.findById(groupId)
@@ -75,7 +112,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
                 .toList();
     }
 
-    private void requireActiveMember(UUID groupId, UUID userId) {
+    private GroupMember requireActiveMember(UUID groupId, UUID userId) {
         GroupMember member = groupMemberRepository.findByGroup_IdAndUserId(groupId, userId)
                 .orElseThrow(() -> new NotAGroupMemberException(
                         "User " + userId + " is not a member of group " + groupId));
@@ -83,5 +120,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
         if (member.getStatus() != GroupMemberStatus.ACTIVE) {
             throw new NotAGroupMemberException("User " + userId + " has left group " + groupId);
         }
+
+        return member;
     }
 }

@@ -9,6 +9,11 @@ package com.strawhats.core.dto.ws;
 public enum WsEventType {
     // /topic/channels/{channelId} and /topic/groups/{groupId} (MESSAGE_NEW is shared)
     MESSAGE_NEW,
+
+    // Edit & delete message feature - broadcast on the same destinations as
+    // MESSAGE_NEW (channel-wide + topic-scoped, or group-wide).
+    MESSAGE_UPDATED,
+    MESSAGE_DELETED,
     CHANNEL_DELETED,
 
     // /user/queue/scheduled (unicast ack to the sender - US-19, NOT broadcast)

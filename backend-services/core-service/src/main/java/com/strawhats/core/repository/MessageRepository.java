@@ -20,12 +20,16 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * is the "all messages, any topic or none" stream.
      * `left join fetch m.topic` avoids an N+1 query per row when
      * MessageMapper reads `message.getTopic()` to populate `topicId`.
+     * Excludes soft-deleted messages (`deletedAt is null`), mirroring
+     * ChannelRepository.findActiveById - a deleted message's row is kept
+     * for audit, but never resurfaces in a history read.
      */
     @Query("""
             select m from Message m
             left join fetch m.topic
             where m.chatType = :chatType and m.chatId = :chatId
             and m.createdAt < :before
+            and m.deletedAt is null
             order by m.createdAt desc
             """)
     List<Message> findHistoryPage(@Param("chatType") ChatType chatType,
@@ -45,6 +49,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             left join fetch m.topic
             where m.chatType = :chatType and m.chatId = :chatId
             and m.createdAt < :before
+            and m.deletedAt is null
               and (
                 (:topicId is null and m.topic is null)
                 or (:topicId is not null and m.topic.id = :topicId)

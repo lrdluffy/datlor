@@ -14,7 +14,7 @@ import {
   UpdateRoleRequest,
   WsErrorMessage,
 } from '../types/ws';
-import { GroupMessageRequest, SendMessageRequest } from '../types/message';
+import { GroupMessageRequest, SendMessageRequest, EditMessageRequest, DeleteMessageRequest, EditGroupMessageRequest, DeleteGroupMessageRequest } from '../types/message';
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? '/ws/connect';
 
@@ -161,6 +161,26 @@ class SocketService {
   /** US-04-equivalent for groups: send a group message (immediate or scheduled, US-19; optional media, US-18). */
   sendGroupMessage(payload: GroupMessageRequest): void {
     this.publish('/app/groups.messages.send', payload);
+  }
+
+  /** Edit a previously sent channel message - only the original sender may edit their own message. */
+  editMessage(payload: EditMessageRequest): void {
+    this.publish('/app/messages.edit', payload);
+  }
+
+  /** Delete a previously sent channel message - the sender or a channel admin/moderator (MODERATOR+). */
+  deleteMessage(payload: DeleteMessageRequest): void {
+    this.publish('/app/messages.delete', payload);
+  }
+
+  /** Group-equivalent of editMessage. */
+  editGroupMessage(payload: EditGroupMessageRequest): void {
+    this.publish('/app/groups.messages.edit', payload);
+  }
+
+  /** Group-equivalent of deleteMessage - the sender or a group ADMIN. */
+  deleteGroupMessage(payload: DeleteGroupMessageRequest): void {
+    this.publish('/app/groups.messages.delete', payload);
   }
 
   /** US-11: Assign channel member roles. */

@@ -49,6 +49,10 @@ interface UseChannelSessionResult {
   loadOlderMessages: () => Promise<void>;
   hasMoreHistory: boolean;
   sendMessage: (options: SendMessageOptions) => void;
+  /** Only the sender may edit their own message - enforced server-side; this just sends the request. */
+  editMessage: (messageId: string, content: string) => void;
+  /** The sender or a channel admin/moderator (MODERATOR+) may delete - enforced server-side. */
+  deleteMessage: (messageId: string) => void;
   /** US-19: messages the current user scheduled that haven't fired yet (private, never seen by anyone else). */
   myScheduledMessages: MessageResponse[];
   updateRole: (targetUserId: string, newRole: ChannelRole) => void;
@@ -109,18 +113,18 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
     setSelectedTopicId(null);
 
     channelApi
-      .getChannel(channelId)
-      .then((detail) => {
-        if (cancelled) return;
-        setChannel(detail);
-        setMembers(detail.members);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err?.response?.data?.message ?? 'Failed to load channel');
-      })
-      .finally(() => {
-        if (!cancelled) setIsChannelLoading(false);
-      });
+        .getChannel(channelId)
+        .then((detail) => {
+          if (cancelled) return;
+          setChannel(detail);
+          setMembers(detail.members);
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err?.response?.data?.message ?? 'Failed to load channel');
+        })
+        .finally(() => {
+          if (!cancelled) setIsChannelLoading(false);
+        });
 
     return () => {
       cancelled = true;
@@ -129,37 +133,37 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
 
   // ---- lazily load the selected bucket's first page (REST) ----
   const loadBucketFirstPage = useCallback(
-    async (key: string) => {
-      if (!channelId || initializedKeysRef.current.has(key) || loadingKeysRef.current.has(key)) return;
-      loadingKeysRef.current.add(key);
+      async (key: string) => {
+        if (!channelId || initializedKeysRef.current.has(key) || loadingKeysRef.current.has(key)) return;
+        loadingKeysRef.current.add(key);
 
-      const topicIdParam = key === ALL_BUCKET_KEY ? undefined : key === GENERAL_BUCKET_KEY ? 'none' : key;
+        const topicIdParam = key === ALL_BUCKET_KEY ? undefined : key === GENERAL_BUCKET_KEY ? 'none' : key;
 
-      try {
-        const page = await channelApi.getHistory(channelId, undefined, HISTORY_PAGE_SIZE, topicIdParam);
-        const chronological = [...page].reverse();
-        setBuckets((prev) => ({
-          ...prev,
-          [key]: {
-            messages: chronological,
-            oldestLoadedAt: page.length > 0 ? page[page.length - 1].createdAt : undefined,
-            hasMore: page.length >= HISTORY_PAGE_SIZE,
-            initialized: true,
-          },
-        }));
-        initializedKeysRef.current.add(key);
-      } catch (err: any) {
-        setError(err?.response?.data?.message ?? 'Failed to load messages');
-        // Mark as initialized even on failure so the UI stops showing a
-        // perpetual loading spinner - the error state above is what
-        // surfaces instead, same as the channel-detail load failure path.
-        setBuckets((prev) => ({ ...prev, [key]: { ...emptyBucket(), hasMore: false, initialized: true } }));
-        initializedKeysRef.current.add(key);
-      } finally {
-        loadingKeysRef.current.delete(key);
-      }
-    },
-    [channelId]
+        try {
+          const page = await channelApi.getHistory(channelId, undefined, HISTORY_PAGE_SIZE, topicIdParam);
+          const chronological = [...page].reverse();
+          setBuckets((prev) => ({
+            ...prev,
+            [key]: {
+              messages: chronological,
+              oldestLoadedAt: page.length > 0 ? page[page.length - 1].createdAt : undefined,
+              hasMore: page.length >= HISTORY_PAGE_SIZE,
+              initialized: true,
+            },
+          }));
+          initializedKeysRef.current.add(key);
+        } catch (err: any) {
+          setError(err?.response?.data?.message ?? 'Failed to load messages');
+          // Mark as initialized even on failure so the UI stops showing a
+          // perpetual loading spinner - the error state above is what
+          // surfaces instead, same as the channel-detail load failure path.
+          setBuckets((prev) => ({ ...prev, [key]: { ...emptyBucket(), hasMore: false, initialized: true } }));
+          initializedKeysRef.current.add(key);
+        } finally {
+          loadingKeysRef.current.delete(key);
+        }
+      },
+      [channelId]
   );
 
   useEffect(() => {
@@ -180,11 +184,44 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
       });
     };
 
+    // Edit & delete message feature: both MESSAGE_UPDATED and
+    // MESSAGE_DELETED are, like MESSAGE_NEW, broadcast on BOTH the
+    // channel-wide stream and (when the message carries a topicId) the
+    // topic-scoped stream, so these too are applied to whichever bucket(s)
+    // already hold the message - a no-op on a bucket that doesn't.
+    const replaceIfPresent = (key: string, message: MessageResponse) => {
+      setBuckets((prev) => {
+        const bucket = prev[key];
+        if (!bucket) return prev;
+        const idx = bucket.messages.findIndex((m) => m.id === message.id);
+        if (idx === -1) return prev;
+        const nextMessages = [...bucket.messages];
+        nextMessages[idx] = message;
+        return { ...prev, [key]: { ...bucket, messages: nextMessages } };
+      });
+    };
+
+    const removeIfPresent = (key: string, messageId: string) => {
+      setBuckets((prev) => {
+        const bucket = prev[key];
+        if (!bucket || !bucket.messages.some((m) => m.id === messageId)) return prev;
+        return { ...prev, [key]: { ...bucket, messages: bucket.messages.filter((m) => m.id !== messageId) } };
+      });
+    };
+
     const unsubChannel = socketService.subscribeToChannel(channelId, (event: ChannelTopicEvent) => {
       if (event.type === 'MESSAGE_NEW') {
         const message = event.payload as MessageResponse;
         appendIfInitialized(ALL_BUCKET_KEY, message);
         appendIfInitialized(message.topicId ?? GENERAL_BUCKET_KEY, message);
+      } else if (event.type === 'MESSAGE_UPDATED') {
+        const message = event.payload as MessageResponse;
+        replaceIfPresent(ALL_BUCKET_KEY, message);
+        replaceIfPresent(message.topicId ?? GENERAL_BUCKET_KEY, message);
+      } else if (event.type === 'MESSAGE_DELETED') {
+        const message = event.payload as MessageResponse;
+        removeIfPresent(ALL_BUCKET_KEY, message.id);
+        removeIfPresent(message.topicId ?? GENERAL_BUCKET_KEY, message.id);
       } else if (event.type === 'CHANNEL_DELETED') {
         setWasDeleted(true);
       }
@@ -229,14 +266,33 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
 
     const topicId = selectedTopicId;
     const unsubTopic = socketService.subscribeToTopic(channelId, topicId, (event: ChannelTopicEvent) => {
-      if (event.type !== 'MESSAGE_NEW') return;
-      const message = event.payload as MessageResponse;
-      if (!initializedKeysRef.current.has(topicId)) return;
-      setBuckets((prev) => {
-        const bucket = prev[topicId] ?? emptyBucket();
-        if (bucket.messages.some((m) => m.id === message.id)) return prev; // de-dup vs channel-wide stream
-        return { ...prev, [topicId]: { ...bucket, messages: [...bucket.messages, message] } };
-      });
+      if (event.type === 'MESSAGE_NEW') {
+        const message = event.payload as MessageResponse;
+        if (!initializedKeysRef.current.has(topicId)) return;
+        setBuckets((prev) => {
+          const bucket = prev[topicId] ?? emptyBucket();
+          if (bucket.messages.some((m) => m.id === message.id)) return prev; // de-dup vs channel-wide stream
+          return { ...prev, [topicId]: { ...bucket, messages: [...bucket.messages, message] } };
+        });
+      } else if (event.type === 'MESSAGE_UPDATED') {
+        const message = event.payload as MessageResponse;
+        setBuckets((prev) => {
+          const bucket = prev[topicId];
+          if (!bucket) return prev;
+          const idx = bucket.messages.findIndex((m) => m.id === message.id);
+          if (idx === -1) return prev;
+          const nextMessages = [...bucket.messages];
+          nextMessages[idx] = message;
+          return { ...prev, [topicId]: { ...bucket, messages: nextMessages } };
+        });
+      } else if (event.type === 'MESSAGE_DELETED') {
+        const message = event.payload as MessageResponse;
+        setBuckets((prev) => {
+          const bucket = prev[topicId];
+          if (!bucket || !bucket.messages.some((m) => m.id === message.id)) return prev;
+          return { ...prev, [topicId]: { ...bucket, messages: bucket.messages.filter((m) => m.id !== message.id) } };
+        });
+      }
     });
 
     return unsubTopic;
@@ -271,38 +327,54 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
   }, [channelId, currentBucketKey, buckets]);
 
   const sendMessage = useCallback(
-    (options: SendMessageOptions) => {
-      if (!channelId) return;
-      // A message inherits whichever real topic is currently selected; the
-      // "All" and "no topic" views both send general, topic-less messages.
-      const topicId =
-        selectedTopicId && selectedTopicId !== GENERAL_BUCKET_KEY ? selectedTopicId : undefined;
-      socketService.sendMessage({
-        channelId,
-        type: options.type ?? 'TEXT',
-        content: options.content,
-        mediaId: options.mediaId,
-        scheduledAt: options.scheduledAt,
-        topicId,
-      });
-    },
-    [channelId, selectedTopicId]
+      (options: SendMessageOptions) => {
+        if (!channelId) return;
+        // A message inherits whichever real topic is currently selected; the
+        // "All" and "no topic" views both send general, topic-less messages.
+        const topicId =
+            selectedTopicId && selectedTopicId !== GENERAL_BUCKET_KEY ? selectedTopicId : undefined;
+        socketService.sendMessage({
+          channelId,
+          type: options.type ?? 'TEXT',
+          content: options.content,
+          mediaId: options.mediaId,
+          scheduledAt: options.scheduledAt,
+          topicId,
+        });
+      },
+      [channelId, selectedTopicId]
+  );
+
+  const editMessage = useCallback(
+      (messageId: string, content: string) => {
+        if (!channelId) return;
+        socketService.editMessage({ channelId, messageId, content });
+      },
+      [channelId]
+  );
+
+  const deleteMessage = useCallback(
+      (messageId: string) => {
+        if (!channelId) return;
+        socketService.deleteMessage({ channelId, messageId });
+      },
+      [channelId]
   );
 
   const updateRole = useCallback(
-    (targetUserId: string, newRole: ChannelRole) => {
-      if (!channelId) return;
-      socketService.updateRole({ channelId, targetUserId, newRole });
-    },
-    [channelId]
+      (targetUserId: string, newRole: ChannelRole) => {
+        if (!channelId) return;
+        socketService.updateRole({ channelId, targetUserId, newRole });
+      },
+      [channelId]
   );
 
   const updateMemberStatus = useCallback(
-    (targetUserId: string, newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED') => {
-      if (!channelId) return;
-      socketService.updateMemberStatus({ channelId, targetUserId, newStatus });
-    },
-    [channelId]
+      (targetUserId: string, newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED') => {
+        if (!channelId) return;
+        socketService.updateMemberStatus({ channelId, targetUserId, newStatus });
+      },
+      [channelId]
   );
 
   const bucketIsLoading = !currentBucket.initialized;
@@ -319,6 +391,8 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
     loadOlderMessages,
     hasMoreHistory: currentBucket.hasMore,
     sendMessage,
+    editMessage,
+    deleteMessage,
     myScheduledMessages,
     updateRole,
     updateMemberStatus,

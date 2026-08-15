@@ -89,4 +89,20 @@ public class Message {
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+
+    /**
+     * Edit & delete message feature: soft delete, mirroring
+     * {@code Channel.deletedAt} - null while the message is active. Content
+     * is preserved for audit; MessageRepository's history queries filter
+     * this out, and MessagePersistenceHelper.deleteMessage is the only
+     * place that sets it.
+     */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    @Transient
+    public boolean isDeleted() {
+        return deletedAt != null;
+    }
 }
