@@ -62,4 +62,14 @@ export const groupApi = {
     });
     return data;
   },
+
+  /**
+   * group-equivalent of channelApi.searchMessages.
+   */
+  searchMessages: async (groupId: string, query: string, before?: string, limit = 50): Promise<MessageResponse[]> => {
+    const { data } = await axiosClient.get<MessageResponse[]>(`/groups/${groupId}/messages/search`, {
+      params: { q: query, before, limit },
+    });
+    return data;
+  },
 };

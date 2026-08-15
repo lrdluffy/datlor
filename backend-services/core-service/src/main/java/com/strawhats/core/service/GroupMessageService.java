@@ -27,6 +27,16 @@ public interface GroupMessageService {
     /** Allowed for the sender or a group ADMIN (soft delete). Broadcasts MESSAGE_DELETED - never over REST. */
     MessageResponse deleteMessage(UUID actingUserId, DeleteGroupMessageRequest request);
 
-
     List<MessageResponse> getHistory(UUID groupId, UUID requestingUserId, LocalDateTime before, int limit);
+
+
+    /**
+     * group-equivalent of {@link MessageService#searchMessages} -
+     * filter this group's messages down to ones containing `query`
+     * (case-insensitive, required/non-blank). Any ACTIVE member may search
+     * (same threshold {@link #getHistory} already uses).
+     */
+    List<MessageResponse> searchMessages(UUID groupId, UUID requestingUserId, String query,
+                                         LocalDateTime before, int limit);
+
 }

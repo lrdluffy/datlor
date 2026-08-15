@@ -109,6 +109,22 @@ public class GroupController {
         return ResponseEntity.ok(groupMessageService.getHistory(groupId, userId, before, limit));
     }
 
+    /**
+     * "6.4 جستجوی پیام‌ها": group-equivalent of ChannelRestController's
+     * message search - `q` is required and matched case-insensitively
+     * against message content.
+     */
+    @GetMapping("/{groupId}/messages/search")
+    public ResponseEntity<List<MessageResponse>> searchMessages(
+            @PathVariable UUID groupId,
+            @RequestParam String q,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime before,
+            @RequestParam(defaultValue = "50") int limit,
+            Authentication authentication) {
+        UUID userId = currentUserId(authentication);
+        return ResponseEntity.ok(groupMessageService.searchMessages(groupId, userId, q, before, limit));
+    }
+
     private UUID currentUserId(Authentication authentication) {
         return (UUID) authentication.getPrincipal();
     }

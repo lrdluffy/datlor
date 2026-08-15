@@ -91,4 +91,35 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             order by m.scheduledAt asc
             """)
     List<Message> findDueScheduledMessages(@Param("now") LocalDateTime now, Pageable pageable);
+
+    /**
+     * "6.4 جستجوی پیام‌ها": filter a chat's messages down to ones whose
+     * content contains `query`, case-insensitively - the query text may
+     * appear anywhere in the message, matching the spec ("messages
+     * containing the user's query text"). Same cursor-pagination shape as
+     * findHistoryPage (pass the oldest `createdAt` currently loaded as
+     * `before` for the next older page of results) and excludes
+     * soft-deleted messages the same way too.
+     * There's no full-text search index yet - `search_outbox` (see
+     * SearchOutbox) is a transactional outbox for a future indexing
+     * consumer that hasn't been built - so this is a plain case-insensitive
+     * substring scan, mirroring ChannelRepository.searchActiveChannels
+     * exactly (including that it does not escape literal `%`/`_` in
+     * `query`, same as that method).
+     */
+    @Query("""
+            select m from Message m
+            left join fetch m.topic
+            where m.chatType = :chatType and m.chatId = :chatId
+            and m.createdAt < :before
+            and m.deletedAt is null
+            and m.content is not null
+            and lower(m.content) like lower(concat('%', :query, '%'))
+            order by m.createdAt desc
+            """)
+    List<Message> searchMessages(@Param("chatType") ChatType chatType,
+                                 @Param("chatId") UUID chatId,
+                                 @Param("query") String query,
+                                 @Param("before") LocalDateTime before,
+                                 Pageable pageable);
 }

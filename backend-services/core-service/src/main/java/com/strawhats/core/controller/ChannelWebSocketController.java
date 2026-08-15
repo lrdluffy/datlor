@@ -3,6 +3,7 @@ package com.strawhats.core.controller;
 import com.strawhats.core.dto.request.*;
 import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
+import com.strawhats.core.dto.response.ChannelTopicResponse;
 import com.strawhats.core.dto.response.MessageResponse;
 import com.strawhats.core.dto.ws.WsErrorMessage;
 import com.strawhats.core.dto.ws.WsEvent;

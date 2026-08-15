@@ -56,6 +56,12 @@ rather than an empty scaffold.
 - Any member with access (ACTIVE status — the same threshold `MembershipService.requireCanSend` already uses to allow sending a message) may create one; topic names must be unique per channel (enforced by the DB's pre-existing `UNIQUE(channel_id, name)` constraint from V1, with a clean `ValidationException` pre-check)
 - Real-time STOMP action (`/app/channels.topics.create`), broadcasting `TOPIC_CREATED` to `/topic/channels/{channelId}/members` — the same "channel structural changes" stream already used for `MEMBER_JOINED`/`MEMBER_ROLE_UPDATED`/`MEMBER_STATUS_UPDATED`/`CHANNEL_DELETED` — so a topic pill appears live for every other member currently viewing the channel, unlike `channels.create` itself (unicast-only, since nobody is subscribed to a channel that didn't exist a moment ago)
 - Renaming/deleting a topic remains out of scope — only creation was requested
+- Every member of a channel or group can filter that chat's own message history down to messages containing a query string, case-insensitively — `GET /api/channels/{channelId}/messages/search?q=...` and the group-equivalent `GET /api/groups/{groupId}/messages/search?q=...`
+- Modeled as a plain REST read (same non-realtime reasoning `getHistory` already uses — see `ChannelRestController`'s class javadoc), with the same cursor-pagination shape (`before`/`limit`) as message history, so results can be paged through
+- No full-text search index exists (`search_outbox` remains an unconsumed transactional outbox for a future indexing consumer - see section 8) — this is a case-insensitive substring (`LIKE`) scan over `messages.content`, mirroring `ChannelRepository.searchActiveChannels`'s existing pattern exactly rather than introducing new search infrastructure
+- Not topic-scoped (a channel search spans every topic and no-topic messages together) and excludes soft-deleted messages, same as history
+- Same permission tier as reading history (any member, including RESTRICTED ones — search is a read, not gated by the ACTIVE-only threshold sending a message requires)
+- Frontend: a collapsible search bar in the channel/group header switches the message pane to a dedicated, read-only search-results view (query-highlighted, newest-first, paginated) — separate from the live chat's `MessageList`, since browsing search hits isn't the same interaction as following a live thread
 
 ---
 
@@ -450,11 +456,13 @@ messages. `MessageResponse.status` is `PENDING` until
 | GET | `/api/channels/{id}` | full detail: members + topics |
 | GET | `/api/channels/{id}/members` | member list & roles (US-10) |
 | GET | `/api/channels/{id}/messages?before=&limit=&topicId=` | paginated history (US-05, initial load); `topicId` omitted = unfiltered, a topic's UUID = that topic only, `none` = no-topic messages only |
+| GET | `/api/channels/{id}/messages/search?q=&before=&limit=` | "6.4 جستجوی پیام‌ها" - case-insensitive substring search over this channel's message content, `q` required; not topic-scoped |
 | DELETE | `/api/channels/{id}` | US-13, `OWNER` only |
 | POST | `/api/groups` | create a group (creator becomes `ADMIN`) |
 | GET | `/api/groups` | groups the caller belongs to |
 | GET | `/api/groups/{id}` | full detail: members |
 | GET | `/api/groups/{id}/messages?before=&limit=` | paginated history (group-equivalent of channel history) |
+| GET | `/api/groups/{id}/messages/search?q=&before=&limit=` | group-equivalent of the channel message search above |
 | POST | `/api/groups/{id}/invites` | `ADMIN` only - invite a user (starts the accept/reject flow) |
 | POST | `/api/groups/invites/{id}/accept` | invitee only |
 | POST | `/api/groups/invites/{id}/reject` | invitee only |

@@ -17,6 +17,7 @@ import com.strawhats.core.repository.ChannelTopicRepository;
 import com.strawhats.core.repository.MessageRepository;
 import com.strawhats.core.service.MembershipService;
 import com.strawhats.core.service.MessageService;
+import jakarta.validation.ValidationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -145,6 +146,32 @@ public class MessageServiceImpl implements MessageService {
 
         return messageRepository
                 .findTopicHistoryPage(ChatType.CHANNEL, channelId, topicId, effectiveBefore, PageRequest.of(0, pageSize))
+                .stream()
+                .map(messageMapper::toResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<MessageResponse> searchMessages(UUID channelId, UUID requestingUserId, String query,
+                                                LocalDateTime before, int limit) {
+        channelRepository.findActiveById(channelId)
+                .orElseThrow(() -> new ResourceNotFoundException("Channel " + channelId + " was not found"));
+
+        // Same permission tier as getHistory/getTopicHistory - a read, not
+        // gated by requireCanSend the way sending a message is.
+        membershipService.requireMembership(channelId, requestingUserId);
+
+        String trimmedQuery = query == null ? "" : query.trim();
+        if (trimmedQuery.isEmpty()) {
+            throw new ValidationException("q is required");
+        }
+
+        int pageSize = clampPageSize(limit);
+        LocalDateTime effectiveBefore = before != null ? before : LocalDateTime.now();
+
+        return messageRepository
+                .searchMessages(ChatType.CHANNEL, channelId, trimmedQuery, effectiveBefore, PageRequest.of(0, pageSize))
                 .stream()
                 .map(messageMapper::toResponse)
                 .toList();

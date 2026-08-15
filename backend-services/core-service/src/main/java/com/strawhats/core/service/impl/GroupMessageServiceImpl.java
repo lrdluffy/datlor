@@ -16,6 +16,7 @@ import com.strawhats.core.repository.GroupMemberRepository;
 import com.strawhats.core.repository.GroupRepository;
 import com.strawhats.core.repository.MessageRepository;
 import com.strawhats.core.service.GroupMessageService;
+import jakarta.validation.ValidationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -112,6 +113,30 @@ public class GroupMessageServiceImpl implements GroupMessageService {
                 .toList();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<MessageResponse> searchMessages(UUID groupId, UUID requestingUserId, String query,
+                                                LocalDateTime before, int limit) {
+        groupRepository.findById(groupId)
+                .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
+
+        requireActiveMember(groupId, requestingUserId);
+
+        String trimmedQuery = query == null ? "" : query.trim();
+        if (trimmedQuery.isEmpty()) {
+            throw new ValidationException("q is required");
+        }
+
+        int pageSize = Math.min(Math.max(limit, 1), MAX_HISTORY_PAGE_SIZE);
+        LocalDateTime effectiveBefore = before != null ? before : LocalDateTime.now();
+
+        return messageRepository
+                .searchMessages(ChatType.GROUP, groupId, trimmedQuery, effectiveBefore, PageRequest.of(0, pageSize))
+                .stream()
+                .map(messageMapper::toResponse)
+                .toList();
+    }
+    
     private GroupMember requireActiveMember(UUID groupId, UUID userId) {
         GroupMember member = groupMemberRepository.findByGroup_IdAndUserId(groupId, userId)
                 .orElseThrow(() -> new NotAGroupMemberException(

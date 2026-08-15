@@ -1,12 +1,16 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Hash, Settings, Loader2, AlertCircle, Clock, ArchiveX } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useChannelSession, NO_TOPIC } from '../hooks/useChannelSession';
+import { useMessageSearch } from '../hooks/useMessageSearch';
+import { channelApi } from '../api/channelApi';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
 import { MemberList } from '../components/MemberList';
 import { TopicSelector } from '../components/TopicSelector';
+import { MessageSearchBar } from '../components/MessageSearchBar';
+import { MessageSearchResults } from '../components/MessageSearchResults';
 import { isAtLeast } from '../types/channel';
 
 export function ChannelViewPage() {
@@ -31,6 +35,15 @@ export function ChannelViewPage() {
     myScheduledMessages,
     createTopic,
   } = useChannelSession(channelId);
+
+  const searchFn = useCallback(
+      (q: string, before?: string, limit?: number) => {
+        if (!channelId) return Promise.resolve([]);
+        return channelApi.searchMessages(channelId, q, before, limit);
+      },
+      [channelId]
+  );
+  const messageSearch = useMessageSearch(searchFn);
 
   useEffect(() => {
     if (wasDeleted) {
@@ -104,15 +117,18 @@ export function ChannelViewPage() {
           </span>
             <h1 className="font-display font-semibold text-ink">{channel.name}</h1>
           </div>
-          {myMembership && (
-              <Link
-                  to={`/channels/${channel.id}/settings`}
-                  className="inline-flex items-center gap-1.5 text-sm text-ink/60 hover:text-accent border-2 border-line hover:border-accent/30 rounded-lg px-3 py-1.5 transition-colors"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                تنظیمات
-              </Link>
-          )}
+          <div className="flex items-center gap-2">
+            <MessageSearchBar query={messageSearch.query} onQueryChange={messageSearch.setQuery} />
+            {myMembership && (
+                <Link
+                    to={`/channels/${channel.id}/settings`}
+                    className="inline-flex items-center gap-1.5 text-sm text-ink/60 hover:text-accent border-2 border-line hover:border-accent/30 rounded-lg px-3 py-1.5 transition-colors"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  تنظیمات
+                </Link>
+            )}
+          </div>
         </header>
 
         {error && (
@@ -122,39 +138,56 @@ export function ChannelViewPage() {
             </p>
         )}
 
-        <TopicSelector
-            topics={channel.topics}
-            selectedTopicId={selectedTopicId}
-            onSelect={setSelectedTopicId}
-            onCreateTopic={createTopic}
-            canCreateTopic={canSend}
-        />
+        {!messageSearch.hasSearched && (
+            <TopicSelector
+                topics={channel.topics}
+                selectedTopicId={selectedTopicId}
+                onSelect={setSelectedTopicId}
+                onCreateTopic={createTopic}
+                canCreateTopic={canSend}
+            />
+        )}
 
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 flex flex-col">
-            <MessageList
-                messages={messages}
-                currentUserId={user?.id ?? ''}
-                hasMoreHistory={hasMoreHistory}
-                onLoadOlder={loadOlderMessages}
-                topics={channel.topics}
-                topicFilterActive={selectedTopicId !== null}
-                canModerate={canModerate}
-                onEdit={editMessage}
-                onDelete={deleteMessage}
-            />
-            {myScheduledMessages.length > 0 && (
-                <p className="text-[11px] text-accent px-4 pt-1 inline-flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {myScheduledMessages.length} پیام زمان‌بندی‌شده در انتظار ارسال
-                </p>
+            {messageSearch.hasSearched ? (
+                <MessageSearchResults
+                    results={messageSearch.results}
+                    query={messageSearch.query}
+                    isSearching={messageSearch.isSearching}
+                    hasSearched={messageSearch.hasSearched}
+                    hasMore={messageSearch.hasMore}
+                    isLoadingMore={messageSearch.isLoadingMore}
+                    onLoadMore={messageSearch.loadMore}
+                    currentUserId={user?.id ?? ''}
+                />
+            ) : (
+                <>
+                  <MessageList
+                      messages={messages}
+                      currentUserId={user?.id ?? ''}
+                      hasMoreHistory={hasMoreHistory}
+                      onLoadOlder={loadOlderMessages}
+                      topics={channel.topics}
+                      topicFilterActive={selectedTopicId !== null}
+                      canModerate={canModerate}
+                      onEdit={editMessage}
+                      onDelete={deleteMessage}
+                  />
+                  {myScheduledMessages.length > 0 && (
+                      <p className="text-[11px] text-accent px-4 pt-1 inline-flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {myScheduledMessages.length} پیام زمان‌بندی‌شده در انتظار ارسال
+                      </p>
+                  )}
+                  <MessageInput
+                      disabled={!canSend}
+                      disabledReason={disabledReason}
+                      onSend={sendMessage}
+                      activeTopicLabel={activeTopicLabel}
+                  />
+                </>
             )}
-            <MessageInput
-                disabled={!canSend}
-                disabledReason={disabledReason}
-                onSend={sendMessage}
-                activeTopicLabel={activeTopicLabel}
-            />
           </div>
           <MemberList members={members} />
         </div>

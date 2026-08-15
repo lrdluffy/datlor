@@ -54,6 +54,20 @@ export const channelApi = {
     return data;
   },
 
+  /**
+   * filter this channel's messages down to ones
+   * containing `query` (case-insensitive). Not topic-scoped - searches
+   * across every topic and no-topic messages alike. Same cursor-pagination
+   * shape as getHistory (pass the oldest `createdAt` currently loaded as
+   * `before` for the next older page of results).
+   */
+  searchMessages: async (channelId: string, query: string, before?: string, limit = 50): Promise<MessageResponse[]> => {
+    const { data } = await axiosClient.get<MessageResponse[]>(`/channels/${channelId}/messages/search`, {
+      params: { q: query, before, limit },
+    });
+    return data;
+  },
+
   /** US-13: Delete channel (soft delete, OWNER only). */
   deleteChannel: async (channelId: string): Promise<void> => {
     await axiosClient.delete(`/channels/${channelId}`);

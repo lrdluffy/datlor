@@ -1,11 +1,14 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, Users, Clock, Loader2, CheckCircle2, AlertCircle, UserPlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useGroupSession } from '../hooks/useGroupSession';
+import { useMessageSearch } from '../hooks/useMessageSearch';
 import { groupApi } from '../api/groupApi';
 import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
+import { MessageSearchBar } from '../components/MessageSearchBar';
+import { MessageSearchResults } from '../components/MessageSearchResults';
 
 export function GroupViewPage() {
   const { groupId } = useParams<{ groupId: string }>();
@@ -13,6 +16,15 @@ export function GroupViewPage() {
 
   const { group, messages, members, isLoading, error, hasMoreHistory, loadOlderMessages, sendMessage, editMessage, deleteMessage, myScheduledMessages } =
       useGroupSession(groupId);
+
+  const searchFn = useCallback(
+      (q: string, before?: string, limit?: number) => {
+        if (!groupId) return Promise.resolve([]);
+        return groupApi.searchMessages(groupId, q, before, limit);
+      },
+      [groupId]
+  );
+  const messageSearch = useMessageSearch(searchFn);
 
   const [targetUserId, setTargetUserId] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -95,10 +107,13 @@ export function GroupViewPage() {
           </span>
             <h1 className="font-display font-semibold text-ink">{group.name}</h1>
           </div>
-          <span className="inline-flex items-center gap-1 text-xs text-ink/50 bg-slate-100 rounded-full px-2.5 py-1">
-          <Users className="w-3 h-3" />
-            {members.length} عضو
-        </span>
+          <div className="flex items-center gap-2">
+            <MessageSearchBar query={messageSearch.query} onQueryChange={messageSearch.setQuery} />
+            <span className="inline-flex items-center gap-1 text-xs text-ink/50 bg-slate-100 rounded-full px-2.5 py-1">
+            <Users className="w-3 h-3" />
+              {members.length} عضو
+          </span>
+          </div>
         </header>
 
         {error && (
@@ -110,28 +125,43 @@ export function GroupViewPage() {
 
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 flex flex-col">
-            <MessageList
-                messages={messages}
-                currentUserId={user?.id ?? ''}
-                hasMoreHistory={hasMoreHistory}
-                onLoadOlder={loadOlderMessages}
-                topics={[]}
-                topicFilterActive={false}
-                canModerate={isAdmin}
-                onEdit={editMessage}
-                onDelete={deleteMessage}
-            />
-            {myScheduledMessages.length > 0 && (
-                <p className="text-[11px] text-accent px-4 pt-1 inline-flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {myScheduledMessages.length} پیام زمان‌بندی‌شده در انتظار ارسال
-                </p>
+            {messageSearch.hasSearched ? (
+                <MessageSearchResults
+                    results={messageSearch.results}
+                    query={messageSearch.query}
+                    isSearching={messageSearch.isSearching}
+                    hasSearched={messageSearch.hasSearched}
+                    hasMore={messageSearch.hasMore}
+                    isLoadingMore={messageSearch.isLoadingMore}
+                    onLoadMore={messageSearch.loadMore}
+                    currentUserId={user?.id ?? ''}
+                />
+            ) : (
+                <>
+                  <MessageList
+                      messages={messages}
+                      currentUserId={user?.id ?? ''}
+                      hasMoreHistory={hasMoreHistory}
+                      onLoadOlder={loadOlderMessages}
+                      topics={[]}
+                      topicFilterActive={false}
+                      canModerate={isAdmin}
+                      onEdit={editMessage}
+                      onDelete={deleteMessage}
+                  />
+                  {myScheduledMessages.length > 0 && (
+                      <p className="text-[11px] text-accent px-4 pt-1 inline-flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {myScheduledMessages.length} پیام زمان‌بندی‌شده در انتظار ارسال
+                      </p>
+                  )}
+                  <MessageInput
+                      disabled={!canSend}
+                      disabledReason={!canSend ? 'شما دیگر عضو این گروه نیستید' : undefined}
+                      onSend={sendMessage}
+                  />
+                </>
             )}
-            <MessageInput
-                disabled={!canSend}
-                disabledReason={!canSend ? 'شما دیگر عضو این گروه نیستید' : undefined}
-                onSend={sendMessage}
-            />
           </div>
 
           <aside className="w-64 border-l border-line bg-white flex flex-col">

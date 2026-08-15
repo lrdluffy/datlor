@@ -112,6 +112,24 @@ public class ChannelRestController {
         return ResponseEntity.ok(messageService.getTopicHistory(channelId, userId, parsedTopicId, before, limit));
     }
 
+    /**
+     * "6.4 جستجوی پیام‌ها": search this channel's messages - `q` is
+     * required and matched case-insensitively against message content.
+     * Same before/limit cursor-pagination shape as getHistory above; not
+     * topic-scoped (searches across every topic and no-topic messages
+     * alike).
+     */
+    @GetMapping("/{channelId}/messages/search")
+    public ResponseEntity<List<MessageResponse>> searchMessages(
+            @PathVariable UUID channelId,
+            @RequestParam String q,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime before,
+            @RequestParam(defaultValue = "50") int limit,
+            Authentication authentication) {
+        UUID userId = currentUserId(authentication);
+        return ResponseEntity.ok(messageService.searchMessages(channelId, userId, q, before, limit));
+    }
+
     /** US-13: Delete channel (soft delete, OWNER only). Broadcasts CHANNEL_DELETED over WS. */
     @DeleteMapping("/{channelId}")
     public ResponseEntity<Void> deleteChannel(@PathVariable UUID channelId, Authentication authentication) {

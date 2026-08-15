@@ -48,4 +48,15 @@ public interface MessageService {
      */
     List<MessageResponse> getTopicHistory(UUID channelId, UUID requestingUserId, UUID topicId,
                                            LocalDateTime before, int limit);
+
+    /**
+     * filter the channel's messages down to ones
+     * containing `query` (case-insensitive, required/non-blank). Same
+     * cursor-pagination shape as {@link #getHistory}. Any member may
+     * search, including RESTRICTED ones (search is a read, same permission
+     * tier as getHistory - not gated by the ACTIVE-only threshold sending a
+     * message requires).
+     */
+    List<MessageResponse> searchMessages(UUID channelId, UUID requestingUserId, String query,
+                                         LocalDateTime before, int limit);
 }
