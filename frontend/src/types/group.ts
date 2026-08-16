@@ -28,6 +28,7 @@ export interface GroupRoleView {
 export interface GroupResponse {
   id: string;
   name: string;
+  description: string | null;
   createdBy: string;
   createdAt: string;
   memberCount: number;
@@ -37,6 +38,7 @@ export interface GroupResponse {
 export interface GroupDetailResponse {
   id: string;
   name: string;
+  description: string | null;
   createdBy: string;
   createdAt: string;
   members: GroupMemberResponse[];
@@ -44,6 +46,12 @@ export interface GroupDetailResponse {
 
 export interface CreateGroupRequest {
   name: string;
+}
+
+/** edit an existing group's name/description - ANY active member may. */
+export interface UpdateGroupRequest {
+  name: string;
+  description?: string;
 }
 
 export interface InviteToGroupRequest {

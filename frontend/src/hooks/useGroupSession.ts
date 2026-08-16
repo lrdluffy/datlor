@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { groupApi } from '../api/groupApi';
 import { socketService } from '../api/socketService';
 import { useSocket } from '../context/SocketContext';
-import { GroupDetailResponse, GroupMemberResponse } from '../types/group';
+import { GroupDetailResponse, GroupMemberResponse, GroupResponse } from '../types/group';
 import { MessageResponse } from '../types/message';
-import { GroupTopicEvent } from '../types/ws';
+import { GroupMembersTopicEvent, GroupTopicEvent } from '../types/ws';
 import { MessageComposerSubmission } from '../components/MessageInput';
 
 const HISTORY_PAGE_SIZE = 50;
@@ -23,6 +23,8 @@ interface UseGroupSessionResult {
   /** The sender or a group ADMIN may delete - enforced server-side. */
   deleteMessage: (messageId: string) => void;
   myScheduledMessages: MessageResponse[];
+  /** true once GROUP_DELETED arrives - the page should redirect. */
+  wasDeleted: boolean;
 }
 
 /**
@@ -40,6 +42,7 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
   const [error, setError] = useState<string | null>(null);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [myScheduledMessages, setMyScheduledMessages] = useState<MessageResponse[]>([]);
+  const [wasDeleted, setWasDeleted] = useState(false);
 
   const oldestLoadedAt = useRef<string | undefined>(undefined);
 
@@ -76,19 +79,36 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
 
     const unsubGroup = socketService.subscribeToGroup(groupId, (event: GroupTopicEvent) => {
       if (event.type === 'MESSAGE_NEW') {
-        setMessages((prev) => [...prev, event.payload]);
+        setMessages((prev) => [...prev, event.payload as MessageResponse]);
       } else if (event.type === 'MESSAGE_UPDATED') {
-        const message = event.payload;
+        const message = event.payload as MessageResponse;
         setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)));
       } else if (event.type === 'MESSAGE_DELETED') {
-        const message = event.payload;
+        const message = event.payload as MessageResponse;
         setMessages((prev) => prev.filter((m) => m.id !== message.id));
+      } else if (event.type === 'GROUP_DELETED') {
+        // mirrors CHANNEL_DELETED - kicks
+        // anyone currently viewing the group back out, in real time.
+        setWasDeleted(true);
       }
     });
 
-    const unsubMembers = socketService.subscribeToGroupMembers(groupId, (event) => {
+    const unsubMembers = socketService.subscribeToGroupMembers(groupId, (event: GroupMembersTopicEvent) => {
+      if (event.type === 'GROUP_UPDATED') {
+        // Another member edited the group's name/description while I'm
+        // viewing it - update in place rather than requiring a reload.
+        const updated = event.payload as GroupResponse;
+        setGroup((prev) => (prev ? { ...prev, name: updated.name, description: updated.description } : prev));
+        return;
+      }
+
+      if (event.type === 'GROUP_DELETED') {
+        setWasDeleted(true);
+        return;
+      }
+
       setMembers((prev) => {
-        const updated = event.payload;
+        const updated = event.payload as GroupMemberResponse;
         const idx = prev.findIndex((m) => m.userId === updated.userId);
         if (idx === -1) return [...prev, updated];
         const next = [...prev];
@@ -167,5 +187,6 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
     editMessage,
     deleteMessage,
     myScheduledMessages,
+    wasDeleted,
   };
 }

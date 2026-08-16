@@ -47,11 +47,11 @@ public class ChannelServiceImpl implements ChannelService {
     private final SimpMessagingTemplate messagingTemplate;
 
     public ChannelServiceImpl(ChannelRepository channelRepository,
-                               ChannelMemberRepository channelMemberRepository,
-                               ChannelTopicRepository channelTopicRepository,
-                               MembershipService membershipService,
-                               ChannelMapper channelMapper,
-                               SimpMessagingTemplate messagingTemplate) {
+                              ChannelMemberRepository channelMemberRepository,
+                              ChannelTopicRepository channelTopicRepository,
+                              MembershipService membershipService,
+                              ChannelMapper channelMapper,
+                              SimpMessagingTemplate messagingTemplate) {
         this.channelRepository = channelRepository;
         this.channelMemberRepository = channelMemberRepository;
         this.channelTopicRepository = channelTopicRepository;
@@ -178,6 +178,34 @@ public class ChannelServiceImpl implements ChannelService {
 
     @Override
     @Transactional
+    public ChannelResponse updateChannel(UUID channelId, UUID actorUserId, String name, String description) {
+        Channel channel = channelRepository.findActiveById(channelId)
+                .orElseThrow(() -> new ResourceNotFoundException("Channel " + channelId + " was not found"));
+
+        ChannelMember actor = channelMemberRepository.findByChannel_IdAndUserId(channelId, actorUserId)
+                .orElseThrow(() -> new NotAChannelMemberException(
+                        "User " + actorUserId + " is not a member of channel " + channelId));
+
+        // "همین افراد" - the SAME people who may delete the channel (see
+        // deleteChannel below): OWNER or MANAGER.
+        requireOwnerOrManager(actor, "edit");
+
+        channel.setName(name.trim());
+        channel.setDescription(description == null ? null : description.trim());
+        channel = channelRepository.save(channel);
+
+        List<ChannelMember> members = membershipService.listMembers(channelId);
+        ChannelResponse response = channelMapper.toChannelResponse(channel, members.size(), actor);
+
+        messagingTemplate.convertAndSend(
+                "/topic/channels/" + channelId + "/members",
+                WsEvent.of(WsEventType.CHANNEL_UPDATED, response));
+
+        return response;
+    }
+
+    @Override
+    @Transactional
     public void deleteChannel(UUID channelId, UUID requestingUserId) {
         Channel channel = channelRepository.findActiveById(channelId)
                 .orElseThrow(() -> new ResourceNotFoundException("Channel " + channelId + " was not found"));
@@ -186,9 +214,8 @@ public class ChannelServiceImpl implements ChannelService {
                 .orElseThrow(() -> new NotAChannelMemberException(
                         "User " + requestingUserId + " is not a member of channel " + channelId));
 
-        if (requester.getRole() != ChannelRole.OWNER) {
-            throw new UnauthorizedActionException("Only the channel owner may delete the channel");
-        }
+        // Widened from OWNER-only
+        requireOwnerOrManager(requester, "delete");
 
         channel.setDeletedAt(LocalDateTime.now());
         channelRepository.save(channel);
@@ -198,5 +225,12 @@ public class ChannelServiceImpl implements ChannelService {
 
         messagingTemplate.convertAndSend("/topic/channels/" + channelId, event);
         messagingTemplate.convertAndSend("/topic/channels/" + channelId + "/members", event);
+    }
+
+    /** Shared by updateChannel and deleteChannel - both are gated to the exact same actors. */
+    private void requireOwnerOrManager(ChannelMember actor, String action) {
+        if (!actor.getRole().isAtLeast(ChannelRole.MANAGER)) {
+            throw new UnauthorizedActionException("Only the channel owner or a manager may " + action + " the channel");
+        }
     }
 }

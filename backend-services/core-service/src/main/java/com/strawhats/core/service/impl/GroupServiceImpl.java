@@ -27,7 +27,9 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -41,11 +43,11 @@ public class GroupServiceImpl implements GroupService {
     private final SimpMessagingTemplate messagingTemplate;
 
     public GroupServiceImpl(GroupRepository groupRepository,
-                             GroupMemberRepository groupMemberRepository,
-                             GroupInviteRepository groupInviteRepository,
-                             IdentityServiceClient identityServiceClient,
-                             GroupMapper groupMapper,
-                             SimpMessagingTemplate messagingTemplate) {
+                            GroupMemberRepository groupMemberRepository,
+                            GroupInviteRepository groupInviteRepository,
+                            IdentityServiceClient identityServiceClient,
+                            GroupMapper groupMapper,
+                            SimpMessagingTemplate messagingTemplate) {
         this.groupRepository = groupRepository;
         this.groupMemberRepository = groupMemberRepository;
         this.groupInviteRepository = groupInviteRepository;
@@ -89,7 +91,7 @@ public class GroupServiceImpl implements GroupService {
     @Override
     @Transactional(readOnly = true)
     public GroupDetailResponse getGroupDetail(UUID groupId, UUID requestingUserId) {
-        Group group = groupRepository.findById(groupId)
+        Group group = groupRepository.findActiveById(groupId)
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
 
         requireActiveMember(groupId, requestingUserId);
@@ -100,8 +102,52 @@ public class GroupServiceImpl implements GroupService {
 
     @Override
     @Transactional
+    public GroupResponse updateGroup(UUID groupId, UUID actorUserId, String name, String description) {
+        Group group = groupRepository.findActiveById(groupId)
+                .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
+
+        // ANY active member, not just ADMIN -
+        // deliberately broader than channel edit. See deleteGroup below.
+        GroupMember actor = requireActiveMemberAndReturn(groupId, actorUserId);
+
+        group.setName(name.trim());
+        group.setDescription(description == null ? null : description.trim());
+        group = groupRepository.save(group);
+
+        List<GroupMember> members = groupMemberRepository.findByGroup_Id(groupId);
+        GroupResponse response = groupMapper.toGroupResponse(group, members.size(), actor);
+
+        messagingTemplate.convertAndSend(
+                "/topic/groups/" + groupId + "/members",
+                WsEvent.of(WsEventType.GROUP_UPDATED, response));
+
+        return response;
+    }
+
+    @Override
+    @Transactional
+    public void deleteGroup(UUID groupId, UUID actorUserId) {
+        Group group = groupRepository.findActiveById(groupId)
+                .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
+
+        // ANY active member may delete the whole group - a deliberately
+        // more casual/broader rule than channel delete (OWNER/MANAGER only)
+        requireActiveMember(groupId, actorUserId);
+
+        group.setDeletedAt(LocalDateTime.now());
+        groupRepository.save(group);
+
+        Map<String, Object> payload = Map.of("groupId", groupId.toString());
+        WsEvent<Map<String, Object>> event = WsEvent.of(WsEventType.GROUP_DELETED, payload);
+
+        messagingTemplate.convertAndSend("/topic/groups/" + groupId, event);
+        messagingTemplate.convertAndSend("/topic/groups/" + groupId + "/members", event);
+    }
+
+    @Override
+    @Transactional
     public GroupInviteResponse invite(UUID groupId, UUID inviterId, UUID inviteeId) {
-        Group group = groupRepository.findById(groupId)
+        Group group = groupRepository.findActiveById(groupId)
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
 
         requireAdmin(groupId, inviterId);
@@ -172,7 +218,7 @@ public class GroupServiceImpl implements GroupService {
     @Override
     @Transactional
     public GroupDetailResponse addMemberDirectly(UUID groupId, UUID actorUserId, UUID targetUserId) {
-        Group group = groupRepository.findById(groupId)
+        Group group = groupRepository.findActiveById(groupId)
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
 
         requireAdmin(groupId, actorUserId);
@@ -223,12 +269,19 @@ public class GroupServiceImpl implements GroupService {
     }
 
     private void requireActiveMember(UUID groupId, UUID userId) {
+        requireActiveMemberAndReturn(groupId, userId);
+    }
+
+    /** Same check as requireActiveMember, but returns the member row for callers that need the role too (e.g. updateGroup, for the response's viewerRole). */
+    private GroupMember requireActiveMemberAndReturn(UUID groupId, UUID userId) {
         GroupMember member = groupMemberRepository.findByGroup_IdAndUserId(groupId, userId)
                 .orElseThrow(() -> new NotAGroupMemberException("User " + userId + " is not a member of group " + groupId));
 
         if (member.getStatus() != GroupMemberStatus.ACTIVE) {
             throw new NotAGroupMemberException("User " + userId + " has left group " + groupId);
         }
+
+        return member;
     }
 
     private void requireAdmin(UUID groupId, UUID userId) {

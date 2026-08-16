@@ -6,6 +6,7 @@ import {
   GroupInviteResponse,
   GroupResponse,
   InviteToGroupRequest,
+  UpdateGroupRequest,
 } from '../types/group';
 import { MessageResponse } from '../types/message';
 
@@ -23,6 +24,17 @@ export const groupApi = {
   getGroup: async (groupId: string): Promise<GroupDetailResponse> => {
     const { data } = await axiosClient.get<GroupDetailResponse>(`/groups/${groupId}`);
     return data;
+  },
+
+  /** edit name/description - ANY active member may. Broadcasts GROUP_UPDATED over WS. */
+  updateGroup: async (groupId: string, payload: UpdateGroupRequest): Promise<GroupResponse> => {
+    const { data } = await axiosClient.patch<GroupResponse>(`/groups/${groupId}`, payload);
+    return data;
+  },
+
+  /** delete the group (soft delete) - ANY active member may. Broadcasts GROUP_DELETED over WS. */
+  deleteGroup: async (groupId: string): Promise<void> => {
+    await axiosClient.delete(`/groups/${groupId}`);
   },
 
   /** ADMIN only. Starts the invite/accept flow. */

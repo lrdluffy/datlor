@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { channelApi } from '../api/channelApi';
 import { socketService } from '../api/socketService';
 import { useSocket } from '../context/SocketContext';
-import { ChannelDetailResponse, ChannelMemberResponse, ChannelRole, ChannelTopicResponse } from '../types/channel';
+import { ChannelDetailResponse, ChannelMemberResponse, ChannelResponse, ChannelRole, ChannelTopicResponse } from '../types/channel';
 import { MessageResponse, MessageType } from '../types/message';
 import { ChannelTopicEvent, MembersTopicEvent, WsErrorMessage } from '../types/ws';
 
@@ -240,6 +240,15 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
           if (prev.topics.some((t) => t.id === topic.id)) return prev; // de-dup own echo
           return { ...prev, topics: [...prev.topics, topic] };
         });
+        return;
+      }
+
+      if (event.type === 'CHANNEL_UPDATED') {
+        // another OWNER/MANAGER edited the
+        // channel's name/description while I'm viewing it - update in
+        // place rather than requiring a reload.
+        const updated = event.payload as ChannelResponse;
+        setChannel((prev) => (prev ? { ...prev, name: updated.name, description: updated.description } : prev));
         return;
       }
 

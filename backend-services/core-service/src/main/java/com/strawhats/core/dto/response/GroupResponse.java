@@ -6,6 +6,8 @@ import java.util.UUID;
 public record GroupResponse(
         UUID id,
         String name,
+        /** Added for parity with ChannelResponse - nullable, like Channel's. */
+        String description,
         UUID createdBy,
         LocalDateTime createdAt,
         int memberCount,

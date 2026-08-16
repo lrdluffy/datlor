@@ -1,11 +1,13 @@
 package com.strawhats.core.controller;
 
+import com.strawhats.core.dto.request.UpdateChannelRequest;
 import com.strawhats.core.dto.response.ChannelDetailResponse;
 import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
 import com.strawhats.core.dto.response.MessageResponse;
 import com.strawhats.core.service.ChannelService;
 import com.strawhats.core.service.MessageService;
+import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -130,12 +132,27 @@ public class ChannelRestController {
         return ResponseEntity.ok(messageService.searchMessages(channelId, userId, q, before, limit));
     }
 
-    /** US-13: Delete channel (soft delete, OWNER only). Broadcasts CHANNEL_DELETED over WS. */
+    /** US-13: Delete channel (soft delete, OWNER or MANAGER). Broadcasts CHANNEL_DELETED over WS. */
     @DeleteMapping("/{channelId}")
     public ResponseEntity<Void> deleteChannel(@PathVariable UUID channelId, Authentication authentication) {
         UUID userId = currentUserId(authentication);
         channelService.deleteChannel(channelId, userId);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * edit the channel's name/description
+     * (OWNER or MANAGER - same actors as delete above). Modeled as REST,
+     * not STOMP, for the same reason deleteChannel is: a one-off
+     * administrative action, not a live multi-party event stream (see this
+     * class's javadoc). Broadcasts CHANNEL_UPDATED over WS regardless.
+     */
+    @PatchMapping("/{channelId}")
+    public ResponseEntity<ChannelResponse> updateChannel(@PathVariable UUID channelId,
+                                                         @Valid @RequestBody UpdateChannelRequest request,
+                                                         Authentication authentication) {
+        UUID userId = currentUserId(authentication);
+        return ResponseEntity.ok(channelService.updateChannel(channelId, userId, request.name(), request.description()));
     }
 
     private UUID currentUserId(Authentication authentication) {

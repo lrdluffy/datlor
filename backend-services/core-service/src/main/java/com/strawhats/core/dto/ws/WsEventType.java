@@ -16,6 +16,10 @@ public enum WsEventType {
     MESSAGE_DELETED,
     CHANNEL_DELETED,
 
+    //  broadcast on the same
+    // "channel structural changes" stream as TOPIC_CREATED below.
+    CHANNEL_UPDATED,
+
     // /user/queue/scheduled (unicast ack to the sender - US-19, NOT broadcast)
     MESSAGE_SCHEDULED,
 
@@ -33,6 +37,12 @@ public enum WsEventType {
 
     // /topic/groups/{groupId}/members
     GROUP_MEMBER_JOINED,
+
+    // GROUP_UPDATED broadcasts here
+    // (mirrors CHANNEL_UPDATED); GROUP_DELETED broadcasts to BOTH this
+    // AND /topic/groups/{groupId}, mirroring CHANNEL_DELETED exactly.
+    GROUP_UPDATED,
+    GROUP_DELETED,
 
     // /user/queue/invites (unicast to the invitee on create, to the inviter on accept/reject)
     GROUP_INVITE_CREATED,

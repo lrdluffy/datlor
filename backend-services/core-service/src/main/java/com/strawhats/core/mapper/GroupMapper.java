@@ -45,6 +45,7 @@ public class GroupMapper {
         return new GroupResponse(
                 group.getId(),
                 group.getName(),
+                group.getDescription(),
                 group.getCreatedBy(),
                 group.getCreatedAt(),
                 memberCount,
@@ -56,6 +57,7 @@ public class GroupMapper {
         return new GroupDetailResponse(
                 group.getId(),
                 group.getName(),
+                group.getDescription(),
                 group.getCreatedBy(),
                 group.getCreatedAt(),
                 members.stream().map(this::toMemberResponse).toList()

@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Users, Clock, Loader2, CheckCircle2, AlertCircle, UserPlus } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Users, Clock, Loader2, CheckCircle2, AlertCircle, UserPlus, Settings, ArchiveX } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useGroupSession } from '../hooks/useGroupSession';
 import { useMessageSearch } from '../hooks/useMessageSearch';
@@ -12,9 +12,10 @@ import { MessageSearchResults } from '../components/MessageSearchResults';
 
 export function GroupViewPage() {
   const { groupId } = useParams<{ groupId: string }>();
+  const navigate = useNavigate();
   const { user } = useAuth();
 
-  const { group, messages, members, isLoading, error, hasMoreHistory, loadOlderMessages, sendMessage, editMessage, deleteMessage, myScheduledMessages } =
+  const { group, messages, members, isLoading, error, wasDeleted, hasMoreHistory, loadOlderMessages, sendMessage, editMessage, deleteMessage, myScheduledMessages } =
       useGroupSession(groupId);
 
   const searchFn = useCallback(
@@ -31,12 +32,30 @@ export function GroupViewPage() {
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (wasDeleted) {
+      const timeout = setTimeout(() => navigate('/groups'), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [wasDeleted, navigate]);
+
   if (isLoading) {
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-accent/5 via-white to-fuchsia-50/40">
           <p className="text-sm text-ink/50 inline-flex items-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" />
             در حال بارگذاری...
+          </p>
+        </div>
+    );
+  }
+
+  if (wasDeleted) {
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-accent/5 via-white to-fuchsia-50/40">
+          <p className="text-sm text-ink/60 inline-flex items-center gap-2">
+            <ArchiveX className="w-4 h-4 text-ink/40" />
+            این گروه حذف شد. در حال بازگشت به لیست گروه‌ها...
           </p>
         </div>
     );
@@ -109,6 +128,13 @@ export function GroupViewPage() {
           </div>
           <div className="flex items-center gap-2">
             <MessageSearchBar query={messageSearch.query} onQueryChange={messageSearch.setQuery} />
+            <Link
+                to={`/groups/${group.id}/settings`}
+                className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-ink/40 hover:text-accent hover:bg-slate-100 transition-colors flex-shrink-0"
+                title="تنظیمات گروه"
+            >
+              <Settings className="w-4 h-4" />
+            </Link>
             <span className="inline-flex items-center gap-1 text-xs text-ink/50 bg-slate-100 rounded-full px-2.5 py-1">
             <Users className="w-3 h-3" />
               {members.length} عضو

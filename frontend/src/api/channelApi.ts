@@ -1,5 +1,5 @@
 import { axiosClient } from './axiosClient';
-import { ChannelDetailResponse, ChannelMemberResponse, ChannelResponse } from '../types/channel';
+import { ChannelDetailResponse, ChannelMemberResponse, ChannelResponse, UpdateChannelRequest } from '../types/channel';
 import { MessageResponse } from '../types/message';
 
 export const channelApi = {
@@ -68,7 +68,13 @@ export const channelApi = {
     return data;
   },
 
-  /** US-13: Delete channel (soft delete, OWNER only). */
+  /** edit name/description (OWNER or MANAGER only). Broadcasts CHANNEL_UPDATED over WS. */
+  updateChannel: async (channelId: string, payload: UpdateChannelRequest): Promise<ChannelResponse> => {
+    const { data } = await axiosClient.patch<ChannelResponse>(`/channels/${channelId}`, payload);
+    return data;
+  },
+
+  /** US-13: Delete channel (soft delete, OWNER or MANAGER). */
   deleteChannel: async (channelId: string): Promise<void> => {
     await axiosClient.delete(`/channels/${channelId}`);
   },

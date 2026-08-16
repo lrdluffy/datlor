@@ -7,6 +7,7 @@ import java.util.UUID;
 public record GroupDetailResponse(
         UUID id,
         String name,
+        String description,
         UUID createdBy,
         LocalDateTime createdAt,
         List<GroupMemberResponse> members

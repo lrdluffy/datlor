@@ -37,10 +37,10 @@ public class GroupMessageServiceImpl implements GroupMessageService {
     private final MessagePersistenceHelper messagePersistenceHelper;
 
     public GroupMessageServiceImpl(MessageRepository messageRepository,
-                                    GroupRepository groupRepository,
-                                    GroupMemberRepository groupMemberRepository,
-                                    MessageMapper messageMapper,
-                                    MessagePersistenceHelper messagePersistenceHelper) {
+                                   GroupRepository groupRepository,
+                                   GroupMemberRepository groupMemberRepository,
+                                   MessageMapper messageMapper,
+                                   MessagePersistenceHelper messagePersistenceHelper) {
         this.messageRepository = messageRepository;
         this.groupRepository = groupRepository;
         this.groupMemberRepository = groupMemberRepository;
@@ -51,7 +51,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
     @Override
     @Transactional
     public MessageResponse sendMessage(UUID senderId, GroupMessageRequest request) {
-        Group group = groupRepository.findById(request.groupId())
+        Group group = groupRepository.findActiveById(request.groupId())
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + request.groupId() + " was not found"));
 
         requireActiveMember(group.getId(), senderId);
@@ -65,7 +65,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
     @Override
     @Transactional
     public MessageResponse editMessage(UUID actingUserId, EditGroupMessageRequest request) {
-        Group group = groupRepository.findById(request.groupId())
+        Group group = groupRepository.findActiveById(request.groupId())
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + request.groupId() + " was not found"));
 
         // Membership is required to act on the group at all; the ACTUAL
@@ -81,7 +81,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
     @Override
     @Transactional
     public MessageResponse deleteMessage(UUID actingUserId, DeleteGroupMessageRequest request) {
-        Group group = groupRepository.findById(request.groupId())
+        Group group = groupRepository.findActiveById(request.groupId())
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + request.groupId() + " was not found"));
 
         GroupMember actor = requireActiveMember(group.getId(), actingUserId);
@@ -95,11 +95,10 @@ public class GroupMessageServiceImpl implements GroupMessageService {
                 ChatType.GROUP, group.getId(), request.messageId(), actingUserId, canModerate);
     }
 
-
     @Override
     @Transactional(readOnly = true)
     public List<MessageResponse> getHistory(UUID groupId, UUID requestingUserId, LocalDateTime before, int limit) {
-        groupRepository.findById(groupId)
+        groupRepository.findActiveById(groupId)
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
 
         requireActiveMember(groupId, requestingUserId);
@@ -117,7 +116,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
     @Transactional(readOnly = true)
     public List<MessageResponse> searchMessages(UUID groupId, UUID requestingUserId, String query,
                                                 LocalDateTime before, int limit) {
-        groupRepository.findById(groupId)
+        groupRepository.findActiveById(groupId)
                 .orElseThrow(() -> new ResourceNotFoundException("Group " + groupId + " was not found"));
 
         requireActiveMember(groupId, requestingUserId);
@@ -136,7 +135,7 @@ public class GroupMessageServiceImpl implements GroupMessageService {
                 .map(messageMapper::toResponse)
                 .toList();
     }
-    
+
     private GroupMember requireActiveMember(UUID groupId, UUID userId) {
         GroupMember member = groupMemberRepository.findByGroup_IdAndUserId(groupId, userId)
                 .orElseThrow(() -> new NotAGroupMemberException(

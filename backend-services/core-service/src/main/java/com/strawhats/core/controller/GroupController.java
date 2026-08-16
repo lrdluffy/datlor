@@ -3,6 +3,7 @@ package com.strawhats.core.controller;
 import com.strawhats.core.dto.request.AddGroupMemberRequest;
 import com.strawhats.core.dto.request.CreateGroupRequest;
 import com.strawhats.core.dto.request.InviteToGroupRequest;
+import com.strawhats.core.dto.request.UpdateGroupRequest;
 import com.strawhats.core.dto.response.GroupDetailResponse;
 import com.strawhats.core.dto.response.GroupInviteResponse;
 import com.strawhats.core.dto.response.GroupResponse;
@@ -53,6 +54,34 @@ public class GroupController {
     public ResponseEntity<GroupDetailResponse> getGroup(@PathVariable UUID groupId, Authentication authentication) {
         return ResponseEntity.ok(groupService.getGroupDetail(groupId, currentUserId(authentication)));
     }
+
+
+    /**
+     * edit the group's name/description -
+     * ANY active member may edit (not just ADMIN), per spec. Modeled as
+     * REST for the same reason group creation is (see this class's
+     * javadoc). Broadcasts GROUP_UPDATED over WS regardless.
+     */
+    @PatchMapping("/{groupId}")
+    public ResponseEntity<GroupResponse> updateGroup(@PathVariable UUID groupId,
+                                                     @Valid @RequestBody UpdateGroupRequest request,
+                                                     Authentication authentication) {
+        UUID userId = currentUserId(authentication);
+        return ResponseEntity.ok(groupService.updateGroup(groupId, userId, request.name(), request.description()));
+    }
+
+    /**
+     * delete the group (soft delete) -
+     * ANY active member may delete it (not just ADMIN), per spec - a
+     * deliberately broader rule than channel delete. Broadcasts
+     * GROUP_DELETED over WS.
+     */
+    @DeleteMapping("/{groupId}")
+    public ResponseEntity<Void> deleteGroup(@PathVariable UUID groupId, Authentication authentication) {
+        groupService.deleteGroup(groupId, currentUserId(authentication));
+        return ResponseEntity.noContent().build();
+    }
+
 
     /** ADMIN only. Starts the invite/accept flow. */
     @PostMapping("/{groupId}/invites")

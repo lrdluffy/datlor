@@ -9,6 +9,7 @@ import { ChannelViewPage } from './pages/ChannelViewPage';
 import { ChannelSettingsPage } from './pages/ChannelSettingsPage';
 import { GroupListPage } from './pages/GroupListPage';
 import { GroupViewPage } from './pages/GroupViewPage';
+import { GroupSettingsPage } from './pages/GroupSettingsPage';
 import { ProfileEditPage } from './pages/ProfileEditPage';
 import { ProfileViewPage } from './pages/ProfileViewPage';
 
@@ -57,6 +58,14 @@ export default function App() {
                             element={
                                 <ProtectedRoute>
                                     <GroupViewPage />
+                                </ProtectedRoute>
+                            }
+                        />
+                        <Route
+                            path="/groups/:groupId/settings"
+                            element={
+                                <ProtectedRoute>
+                                    <GroupSettingsPage />
                                 </ProtectedRoute>
                             }
                         />

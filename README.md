@@ -67,6 +67,10 @@ rather than an empty scaffold.
 - New `PublicProfileResponse` (`userId`/`displayName`/`bio`/`avatarMediaId`) deliberately excludes `allowDirectGroupAdd` — that flag is a privacy *preference* (already has its own narrowly-scoped internal-only view, `PrivacyProfileResponse`, used solely by core-service's US-17 direct-add check), not profile *content*, so a random viewer has no business reading it directly
 - Frontend: new read-only `ProfileViewPage` at `/profiles/:userId` (offers a shortcut to `/profile/edit` when viewing your own id); every existing "list of other users in this context" — a channel's `MemberList`, `RoleManagementPanel`, and a group's member list — now links each row to that member's profile, since a page nobody can reach isn't really shipped
 - Member rows still render a truncated user id rather than a display name (see "Member display names" in section 8) — clicking through to the profile is, for now, how you find out who someone actually is; a separate follow-up would additionally enrich the member list itself
+- Closes two gaps: channel *editing* didn't exist at all (only creation and deletion did), and group *editing and deletion* didn't exist at all
+- **Channel**: `PATCH /api/channels/{id}` (new) edits `name`/`description`; `DELETE /api/channels/{id}` (US-13) is **widened** from `OWNER`-only to `OWNER` **or** `MANAGER` — the spec says "توسط مدیرانش" ("by its managers", plural), which didn't match the old owner-only rule. Both actions share one `requireOwnerOrManager` check, since the spec says editing is "done by these same people" who may delete. Both REST (same one-off-administrative-action reasoning `ChannelRestController`'s javadoc already gives for delete), both broadcast over WS (`CHANNEL_UPDATED`/`CHANNEL_DELETED`) to `/topic/channels/{id}/members` so other viewers update live.
+- **Group**: `PATCH`/`DELETE /api/groups/{id}` (both new) — deliberately gated to **any active member**, not just `ADMIN`, per spec ("توسط هریک از اعضای آن" — "by any one of its members"), a genuinely broader/more casual rule than the channel equivalent. Required schema work first: `groups` had neither a `description` column (V7 adds it, for parity with `channels`) nor a `deleted_at` column (V7 adds this too — groups couldn't even represent "deleted" before this). `GroupRepository.findActiveById` was added mirroring `ChannelRepository.findActiveById`, and every remaining `groupRepository.findById(...)` call site (6 total, across `GroupServiceImpl` and `GroupMessageServiceImpl`) was switched to it so a soft-deleted group is consistently "not found" everywhere — including for sending/editing/deleting/searching its messages.
+- Frontend: `ChannelSettingsPage` gained an edit form (gated to `OWNER`/`MANAGER`, same as its existing delete button, whose visibility was widened to match); a brand-new `GroupSettingsPage` (edit form + delete button, deliberately ungated — any member reaching the page may use either) plus a settings link in `GroupViewPage`'s header, mirroring the channel one. `GroupViewPage` gained the same `wasDeleted` → redirect pattern `ChannelViewPage` already had for `CHANNEL_DELETED`.
 
 ---
 
@@ -220,14 +224,18 @@ not just on their next send attempt. A topic never grants an exception to
 this: blocked is blocked, in every topic and in the no-topic bucket alike.
 
 ### US-13 — Delete channel
-Modeled as **REST**, not WS: `DELETE /api/channels/{id}` (`OWNER` only),
-because it's a one-off administrative action rather than a live multi-party
-event stream. It soft-deletes (`deleted_at`, message history is preserved
-for audit) and then broadcasts a `CHANNEL_DELETED` event to both
-`/topic/channels/{channelId}` and `/topic/channels/{channelId}/members` from
-inside the service layer, so anyone currently viewing the channel is kicked
-back to the channel list in real time even though the delete itself was
-triggered over HTTP.
+Modeled as **REST**, not WS: `DELETE /api/channels/{id}` (`OWNER` or
+`MANAGER` — widened from `OWNER`-only in Sprint 9, see "5.4 ویرایش و حذف
+کانال و گروه"), because it's a one-off administrative action rather than a
+live multi-party event stream. It soft-deletes (`deleted_at`, message
+history is preserved for audit) and then broadcasts a `CHANNEL_DELETED`
+event to both `/topic/channels/{channelId}` and
+`/topic/channels/{channelId}/members` from inside the service layer, so
+anyone currently viewing the channel is kicked back to the channel list in
+real time even though the delete itself was triggered over HTTP.
+`PATCH /api/channels/{id}` (edit `name`/`description`, same `OWNER`/
+`MANAGER` actors, broadcasting `CHANNEL_UPDATED` the same way) was added
+alongside it.
 
 ### Media schema (`media_files`) + US-18 — Attach media to a message
 `media-service` owns exactly one table, `media_files` (`id`, `uploader_id`,
@@ -462,12 +470,15 @@ messages. `MessageResponse.status` is `PENDING` until
 | GET | `/api/channels/{id}/members` | member list & roles (US-10) |
 | GET | `/api/channels/{id}/messages?before=&limit=&topicId=` | paginated history (US-05, initial load); `topicId` omitted = unfiltered, a topic's UUID = that topic only, `none` = no-topic messages only |
 | GET | `/api/channels/{id}/messages/search?q=&before=&limit=` | "6.4 جستجوی پیام‌ها" - case-insensitive substring search over this channel's message content, `q` required; not topic-scoped |
-| DELETE | `/api/channels/{id}` | US-13, `OWNER` only |
+| PATCH | `/api/channels/{id}` | "5.4 ویرایش و حذف کانال و گروه" - edit `name`/`description`, `OWNER` or `MANAGER` |
+| DELETE | `/api/channels/{id}` | US-13, `OWNER` or `MANAGER` (widened in Sprint 9, was `OWNER`-only) |
 | POST | `/api/groups` | create a group (creator becomes `ADMIN`) |
 | GET | `/api/groups` | groups the caller belongs to |
 | GET | `/api/groups/{id}` | full detail: members |
 | GET | `/api/groups/{id}/messages?before=&limit=` | paginated history (group-equivalent of channel history) |
 | GET | `/api/groups/{id}/messages/search?q=&before=&limit=` | group-equivalent of the channel message search above |
+| PATCH | `/api/groups/{id}` | "5.4 ویرایش و حذف کانال و گروه" - edit `name`/`description`, ANY active member |
+| DELETE | `/api/groups/{id}` | "5.4 ویرایش و حذف کانال و گروه" - ANY active member (broader than channel delete) |
 | POST | `/api/groups/{id}/invites` | `ADMIN` only - invite a user (starts the accept/reject flow) |
 | POST | `/api/groups/invites/{id}/accept` | invitee only |
 | POST | `/api/groups/invites/{id}/reject` | invitee only |

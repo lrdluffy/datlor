@@ -1,12 +1,13 @@
 import { ChannelMemberResponse, ChannelResponse, ChannelTopicResponse } from './channel';
 import { MessageResponse } from './message';
-import { GroupInviteResponse, GroupMemberResponse } from './group';
+import { GroupInviteResponse, GroupMemberResponse, GroupResponse } from './group';
 
 export type WsEventType =
     | 'MESSAGE_NEW'
     | 'MESSAGE_UPDATED'
     | 'MESSAGE_DELETED'
     | 'CHANNEL_DELETED'
+    | 'CHANNEL_UPDATED'
     | 'MESSAGE_SCHEDULED'
     | 'CHANNEL_CREATED'
     | 'MEMBER_JOINED'
@@ -14,6 +15,8 @@ export type WsEventType =
     | 'MEMBER_STATUS_UPDATED'
     | 'TOPIC_CREATED'
     | 'GROUP_MEMBER_JOINED'
+    | 'GROUP_UPDATED'
+    | 'GROUP_DELETED'
     | 'GROUP_INVITE_CREATED'
     | 'GROUP_INVITE_ACCEPTED'
     | 'GROUP_INVITE_REJECTED';
@@ -34,15 +37,18 @@ export type ChannelTopicEvent =
     | WsEvent<MessageResponse>
     | WsEvent<{ channelId: string }>;
 
-export type GroupTopicEvent = WsEvent<MessageResponse>;
+/** GROUP_DELETED shares this destination with MESSAGE_NEW, mirroring how CHANNEL_DELETED shares /topic/channels/{channelId}. */
+export type GroupTopicEvent = WsEvent<MessageResponse> | WsEvent<{ groupId: string }>;
 
 /**
- * TOPIC_CREATED shares this destination with the member events (see
- * ChannelWebSocketController.createTopic) - "channel structural changes",
+ * TOPIC_CREATED and CHANNEL_UPDATED share this destination with the member
+ * events (see ChannelWebSocketController) - "channel structural changes",
  * not strictly member-only.
  */
-export type MembersTopicEvent = WsEvent<ChannelMemberResponse> | WsEvent<ChannelTopicResponse>;
-export type GroupMembersTopicEvent = WsEvent<GroupMemberResponse>;
+export type MembersTopicEvent = WsEvent<ChannelMemberResponse> | WsEvent<ChannelTopicResponse> | WsEvent<ChannelResponse>;
+
+/** GROUP_UPDATED and GROUP_DELETED share this destination with the member events, same reasoning as MembersTopicEvent above. */
+export type GroupMembersTopicEvent = WsEvent<GroupMemberResponse> | WsEvent<GroupResponse> | WsEvent<{ groupId: string }>;
 
 export type ChannelCreatedEvent = WsEvent<ChannelResponse>;
 export type GroupInviteEvent = WsEvent<GroupInviteResponse>;

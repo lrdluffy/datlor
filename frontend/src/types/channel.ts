@@ -44,6 +44,12 @@ export interface ChannelDetailResponse {
   topics: ChannelTopicResponse[];
 }
 
+/** edit an existing channel's name/description - OWNER or MANAGER only. */
+export interface UpdateChannelRequest {
+  name: string;
+  description?: string;
+}
+
 /** Role ranking used for client-side permission gating (mirrors ChannelRole.java). */
 export const ROLE_RANK: Record<ChannelRole, number> = {
   OWNER: 0,

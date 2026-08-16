@@ -17,6 +17,25 @@ public interface GroupService {
     /** Creates the group and adds the creator as its sole ADMIN. */
     GroupResponse createGroup(UUID creatorUserId, String name);
 
+    /**
+     * edit the group's name/description.
+     * ANY active member may edit - deliberately broader than channel edit
+     * (OWNER/MANAGER only), per spec ("by any
+     * one of its members"). Broadcasts GROUP_UPDATED to
+     * /topic/groups/{groupId}/members.
+     */
+    GroupResponse updateGroup(UUID groupId, UUID actorUserId, String name, String description);
+
+    /**
+     * delete the group (soft delete). ANY
+     * active member may delete it - same "any member" rule as
+     * {@link #updateGroup}, a deliberately more casual/broader rule than
+     * channel delete. Broadcasts GROUP_DELETED to both group topics,
+     * mirroring how ChannelService.deleteChannel broadcasts CHANNEL_DELETED.
+     */
+    void deleteGroup(UUID groupId, UUID actorUserId);
+
+
     List<GroupResponse> listGroupsForUser(UUID userId);
 
     GroupDetailResponse getGroupDetail(UUID groupId, UUID requestingUserId);

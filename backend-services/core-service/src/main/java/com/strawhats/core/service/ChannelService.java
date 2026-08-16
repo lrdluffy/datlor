@@ -46,9 +46,17 @@ public interface ChannelService {
     ChannelDetailResponse getChannelDetail(UUID channelId, UUID requestingUserId);
 
     /**
-     * US-13: Delete channel (soft delete). Only the OWNER may delete.
-     * Broadcasts CHANNEL_DELETED to both channel topics so connected
-     * clients can react in real time.
+     * edit the channel's name/description.
+     * Same actors as {@link #deleteChannel} - OWNER or MANAGER. Broadcasts
+     * CHANNEL_UPDATED to /topic/channels/{channelId}/members, the same
+     * "channel structural changes" stream {@link #createTopic} uses.
+     */
+    ChannelResponse updateChannel(UUID channelId, UUID actorUserId, String name, String description);
+
+    /**
+     * US-13: Delete channel (soft delete). OWNER or MANAGER may delete -
+     * Broadcasts CHANNEL_DELETED to
+     * both channel topics so connected clients can react in real time.
      */
     void deleteChannel(UUID channelId, UUID requestingUserId);
 }
