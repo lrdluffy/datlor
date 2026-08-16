@@ -4,6 +4,7 @@ import com.strawhats.identity.dto.request.UpdatePrivacyRequest;
 import com.strawhats.identity.dto.request.UpdateProfileRequest;
 import com.strawhats.identity.dto.response.PrivacyProfileResponse;
 import com.strawhats.identity.dto.response.ProfileResponse;
+import com.strawhats.identity.dto.response.PublicProfileResponse;
 import com.strawhats.identity.entity.Profile;
 import com.strawhats.identity.exception.ResourceNotFoundException;
 import com.strawhats.identity.mapper.ProfileMapper;
@@ -57,6 +58,12 @@ public class ProfileServiceImpl implements ProfileService {
     @Transactional(readOnly = true)
     public PrivacyProfileResponse getPrivacyProfile(UUID userId) {
         return profileMapper.toPrivacyResponse(findOrThrow(userId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PublicProfileResponse getPublicProfile(UUID userId) {
+        return profileMapper.toPublicProfileResponse(findOrThrow(userId));
     }
 
     private Profile findOrThrow(UUID userId) {

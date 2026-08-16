@@ -173,25 +173,30 @@ export function GroupViewPage() {
             </div>
             <ul className="flex-1 overflow-y-auto">
               {members.map((member) => (
-                  <li key={member.userId} className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 transition-colors">
-                <span className="relative flex h-2 w-2 flex-shrink-0">
-                  {member.status === 'ACTIVE' && (
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
-                  )}
-                  <span
-                      className={`relative inline-flex rounded-full h-2 w-2 ${
-                          member.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-ink/20'
-                      }`}
-                  />
-                </span>
-                    <span className="truncate flex-1 text-ink/80">{member.userId.slice(0, 8)}</span>
-                    <span
-                        className={`text-[10px] rounded-full px-1.5 py-0.5 flex-shrink-0 ${
-                            member.role === 'ADMIN' ? 'bg-accent/10 text-accent font-medium' : 'text-ink/40'
-                        }`}
+                  <li key={member.userId}>
+                    <Link
+                        to={`/profiles/${member.userId}`}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 transition-colors"
                     >
-                  {member.role === 'ADMIN' ? 'مدیر' : 'عضو'}
-                </span>
+                  <span className="relative flex h-2 w-2 flex-shrink-0">
+                    {member.status === 'ACTIVE' && (
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                    )}
+                    <span
+                        className={`relative inline-flex rounded-full h-2 w-2 ${
+                            member.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-ink/20'
+                        }`}
+                    />
+                  </span>
+                      <span className="truncate flex-1 text-ink/80">{member.userId.slice(0, 8)}</span>
+                      <span
+                          className={`text-[10px] rounded-full px-1.5 py-0.5 flex-shrink-0 ${
+                              member.role === 'ADMIN' ? 'bg-accent/10 text-accent font-medium' : 'text-ink/40'
+                          }`}
+                      >
+                    {member.role === 'ADMIN' ? 'مدیر' : 'عضو'}
+                  </span>
+                    </Link>
                   </li>
               ))}
             </ul>

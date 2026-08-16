@@ -3,15 +3,12 @@ package com.strawhats.identity.controller;
 import com.strawhats.identity.dto.request.UpdatePrivacyRequest;
 import com.strawhats.identity.dto.request.UpdateProfileRequest;
 import com.strawhats.identity.dto.response.ProfileResponse;
+import com.strawhats.identity.dto.response.PublicProfileResponse;
 import com.strawhats.identity.service.ProfileService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
@@ -44,6 +41,17 @@ public class ProfileController {
         return ResponseEntity.ok(profileService.updatePrivacy(currentUserId(authentication), request));
     }
 
+    /**
+     * view ANY user's profile - any
+     * authenticated caller, not scoped to a shared channel/group. Note
+     * this is registered AFTER /me above: Spring matches literal path
+     * segments before treated as a {userId} template, so a request to
+     * /api/profiles/me still resolves to getMyProfile, never here.
+     */
+    @GetMapping("/{userId}")
+    public ResponseEntity<PublicProfileResponse> getProfile(@PathVariable UUID userId) {
+        return ResponseEntity.ok(profileService.getPublicProfile(userId));
+    }
     private UUID currentUserId(Authentication authentication) {
         return (UUID) authentication.getPrincipal();
     }

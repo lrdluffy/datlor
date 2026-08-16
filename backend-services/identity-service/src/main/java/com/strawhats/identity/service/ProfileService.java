@@ -4,6 +4,7 @@ import com.strawhats.identity.dto.request.UpdatePrivacyRequest;
 import com.strawhats.identity.dto.request.UpdateProfileRequest;
 import com.strawhats.identity.dto.response.PrivacyProfileResponse;
 import com.strawhats.identity.dto.response.ProfileResponse;
+import com.strawhats.identity.dto.response.PublicProfileResponse;
 
 import java.util.UUID;
 
@@ -19,4 +20,12 @@ public interface ProfileService {
 
     /** Used by core-service (via the /internal/** surface) to check US-17 before a direct group add. */
     PrivacyProfileResponse getPrivacyProfile(UUID userId);
+
+    /**
+     * view ANY user's profile, not
+     * just your own - any authenticated user may look up any other user's
+     * public profile fields. Deliberately excludes
+     * {@code allowDirectGroupAdd} - see {@link PublicProfileResponse}.
+     */
+    PublicProfileResponse getPublicProfile(UUID userId);
 }

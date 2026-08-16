@@ -62,6 +62,11 @@ rather than an empty scaffold.
 - Not topic-scoped (a channel search spans every topic and no-topic messages together) and excludes soft-deleted messages, same as history
 - Same permission tier as reading history (any member, including RESTRICTED ones — search is a read, not gated by the ACTIVE-only threshold sending a message requires)
 - Frontend: a collapsible search bar in the channel/group header switches the message pane to a dedicated, read-only search-results view (query-highlighted, newest-first, paginated) — separate from the live chat's `MessageList`, since browsing search hits isn't the same interaction as following a live thread
+- Closes the "view" half of US-15 (identity-service already had the "edit your own profile" half): any authenticated user can now look up any other user's public profile — `GET /api/profiles/{userId}` (identity-service), alongside the existing `GET /api/profiles/me`
+- The service layer was already fully ready for this (`ProfileService.getProfile(UUID userId)` never assumed "self") — the only real gap was the missing endpoint, page, and a way to actually reach it from the UI
+- New `PublicProfileResponse` (`userId`/`displayName`/`bio`/`avatarMediaId`) deliberately excludes `allowDirectGroupAdd` — that flag is a privacy *preference* (already has its own narrowly-scoped internal-only view, `PrivacyProfileResponse`, used solely by core-service's US-17 direct-add check), not profile *content*, so a random viewer has no business reading it directly
+- Frontend: new read-only `ProfileViewPage` at `/profiles/:userId` (offers a shortcut to `/profile/edit` when viewing your own id); every existing "list of other users in this context" — a channel's `MemberList`, `RoleManagementPanel`, and a group's member list — now links each row to that member's profile, since a page nobody can reach isn't really shipped
+- Member rows still render a truncated user id rather than a display name (see "Member display names" in section 8) — clicking through to the profile is, for now, how you find out who someone actually is; a separate follow-up would additionally enrich the member list itself
 
 ---
 
@@ -476,6 +481,7 @@ messages. `MessageResponse.status` is `PENDING` until
 | GET | `/api/profiles/me` | the caller's own profile |
 | PATCH | `/api/profiles/me` | US-15 - edit `displayName`/`bio`/`avatarMediaId` |
 | PATCH | `/api/profiles/me/privacy` | US-17 - toggle `allowDirectGroupAdd` |
+| GET | `/api/profiles/{userId}` | "10.4 مشاهده و مدیریت نمایه کاربری" - view ANY user's public profile (no `allowDirectGroupAdd`) |
 
 **media-service**
 
