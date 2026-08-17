@@ -13,6 +13,7 @@ export type WsEventType =
     | 'MEMBER_JOINED'
     | 'MEMBER_ROLE_UPDATED'
     | 'MEMBER_STATUS_UPDATED'
+    | 'MEMBER_MEDIA_PERMISSION_UPDATED'
     | 'TOPIC_CREATED'
     | 'GROUP_MEMBER_JOINED'
     | 'GROUP_UPDATED'
@@ -73,6 +74,13 @@ export interface UpdateMemberStatusRequest {
   channelId: string;
   targetUserId: string;
   newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED';
+}
+
+/** restrict/re-allow a member's ability to attach media - MODERATOR+, actor must outrank target. */
+export interface UpdateMediaPermissionRequest {
+  channelId: string;
+  targetUserId: string;
+  mediaAllowed: boolean;
 }
 
 /** Create an additional topic beyond the default one seeded at channel creation. */

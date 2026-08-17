@@ -22,7 +22,7 @@ export function ChannelSettingsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const { channel, members, isLoading, error, updateRole, updateMemberStatus } = useChannelSession(channelId);
+  const { channel, members, isLoading, error, updateRole, updateMemberStatus, updateMediaPermission } = useChannelSession(channelId);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -140,7 +140,7 @@ export function ChannelSettingsPage() {
               </p>
           )}
 
-          {/* OWNER/MANAGER only - same actors as the delete button below. */}
+          {/* "5.4 ویرایش و حذف کانال و گروه": OWNER/MANAGER only - same actors as the delete button below. */}
           {canManage && (
               <>
                 <h2 className="text-sm font-semibold text-ink/70 mb-2 inline-flex items-center gap-1.5">
@@ -207,6 +207,7 @@ export function ChannelSettingsPage() {
                 currentUserRole={myMembership.role}
                 onUpdateRole={updateRole}
                 onUpdateStatus={updateMemberStatus}
+                onUpdateMediaPermission={updateMediaPermission}
             />
           </div>
 

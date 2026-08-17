@@ -58,4 +58,13 @@ public interface MembershipService {
      *    cannot block a MANAGER or the OWNER; a MANAGER cannot block the OWNER).
      */
     ChannelMember updateStatus(UUID channelId, UUID actorUserId, UUID targetUserId, MemberStatus newStatus);
+
+    /**
+     * let a channel admin restrict/re-allow a specific
+     * member's ability to attach media (photo/video/audio/file) to their
+     * messages. Same authorization shape as {@link #updateStatus} - MODERATOR
+     * and above, actor must outrank target, nobody may act on themselves -
+     * since this is the same kind of per-member moderation action.
+     */
+    ChannelMember updateMediaPermission(UUID channelId, UUID actorUserId, UUID targetUserId, boolean mediaAllowed);
 }

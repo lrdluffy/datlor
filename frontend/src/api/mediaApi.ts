@@ -8,8 +8,8 @@ export const mediaApi = {
   upload: async (file: File, onProgress?: (percent: number) => void): Promise<MediaFileResponse> => {
     const formData = new FormData();
     formData.append('file', file);
-
     const { data } = await axiosClient.post<MediaFileResponse>('/media', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
       onUploadProgress: (event) => {
         if (onProgress && event.total) {
           onProgress(Math.round((event.loaded / event.total) * 100));

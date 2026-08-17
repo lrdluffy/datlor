@@ -9,7 +9,6 @@ package com.strawhats.core.dto.ws;
 public enum WsEventType {
     // /topic/channels/{channelId} and /topic/groups/{groupId} (MESSAGE_NEW is shared)
     MESSAGE_NEW,
-
     // Edit & delete message feature - broadcast on the same destinations as
     // MESSAGE_NEW (channel-wide + topic-scoped, or group-wide).
     MESSAGE_UPDATED,
@@ -31,6 +30,9 @@ public enum WsEventType {
     MEMBER_ROLE_UPDATED,
     MEMBER_STATUS_UPDATED,
 
+    // broadcasts the same ChannelMemberResponse shape
+    // MEMBER_ROLE_UPDATED/MEMBER_STATUS_UPDATED already do.
+    MEMBER_MEDIA_PERMISSION_UPDATED,
     // Create additional channel topic feature - broadcast on the same
     // "channel structural changes" stream as the member events above.
     TOPIC_CREATED,

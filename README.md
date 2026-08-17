@@ -1,7 +1,5 @@
 # Datlor — Identity + Core Messaging + Media Platform
 
-Four sprints implemented against `SD_PROJ.pdf`:
-
 **Sprint 1 — identity-service** (auth foundation)
 
 | # | Item |
@@ -71,6 +69,9 @@ rather than an empty scaffold.
 - **Channel**: `PATCH /api/channels/{id}` (new) edits `name`/`description`; `DELETE /api/channels/{id}` (US-13) is **widened** from `OWNER`-only to `OWNER` **or** `MANAGER` — the spec says "توسط مدیرانش" ("by its managers", plural), which didn't match the old owner-only rule. Both actions share one `requireOwnerOrManager` check, since the spec says editing is "done by these same people" who may delete. Both REST (same one-off-administrative-action reasoning `ChannelRestController`'s javadoc already gives for delete), both broadcast over WS (`CHANNEL_UPDATED`/`CHANNEL_DELETED`) to `/topic/channels/{id}/members` so other viewers update live.
 - **Group**: `PATCH`/`DELETE /api/groups/{id}` (both new) — deliberately gated to **any active member**, not just `ADMIN`, per spec ("توسط هریک از اعضای آن" — "by any one of its members"), a genuinely broader/more casual rule than the channel equivalent. Required schema work first: `groups` had neither a `description` column (V7 adds it, for parity with `channels`) nor a `deleted_at` column (V7 adds this too — groups couldn't even represent "deleted" before this). `GroupRepository.findActiveById` was added mirroring `ChannelRepository.findActiveById`, and every remaining `groupRepository.findById(...)` call site (6 total, across `GroupServiceImpl` and `GroupMessageServiceImpl`) was switched to it so a soft-deleted group is consistently "not found" everywhere — including for sending/editing/deleting/searching its messages.
 - Frontend: `ChannelSettingsPage` gained an edit form (gated to `OWNER`/`MANAGER`, same as its existing delete button, whose visibility was widened to match); a brand-new `GroupSettingsPage` (edit form + delete button, deliberately ungated — any member reaching the page may use either) plus a settings link in `GroupViewPage`'s header, mirroring the channel one. `GroupViewPage` gained the same `wasDeleted` → redirect pattern `ChannelViewPage` already had for `CHANNEL_DELETED`.
+- **Media was invisible.** `MessageList` rendered every non-text message as a literal label — `message.mediaId` was never even read. New `MediaAttachment` component actually renders it: `IMAGE` messages get an `<img>`; `FILE` messages (which is everything that isn't a plain image - `MessageType` has no separate `VIDEO`/`AUDIO` value) get their real MIME type looked up once via media-service's existing `GET /media/{id}` metadata endpoint (cached client-side by `mediaId` - a file's type never changes once uploaded) to choose a `<video>` player, `<audio>` player, or a generic download link. No backend schema change needed - media-service already stores/serves any MIME type generically.
+- **`channel_members.media_allowed` was a dead field.** It existed in the schema/entity/DTO since V1, defaulting to `true`, but was never read as a permission gate and had no admin UI to ever set it `false`. Now: `MessageServiceImpl.sendMessage` checks it whenever a message attaches media (plain text is unaffected even for a restricted member), and `MembershipService.updateMediaPermission` (new) lets a channel admin toggle it — same authorization shape as US-12's block/restrict (`MODERATOR`+, actor must outrank target, no self-targeting), new `/app/channels.updateMediaPermission` WS action broadcasting `MEMBER_MEDIA_PERMISSION_UPDATED` (same `ChannelMemberResponse` payload shape the role/status events already use). A toggle button was added to `RoleManagementPanel`, reusing its existing `canChangeStatus` gate since the rule is identical.
+- **Avatars weren't displayed anywhere except the profile pages themselves** . New reusable `Avatar` component: the viewer's own avatar comes free from `useAuth()` (`UserResponse.avatarMediaId`, already loaded at login); anyone else's goes through a new cached `useUserAvatar` hook reusing `GET /api/profiles/{userId}` (cached by userId so a message list or member list with many rows from the same senders doesn't refetch per row). Wired into `MessageList` (sender avatars) and every member-list surface (`MemberList`, `RoleManagementPanel`, both group member lists).
 
 ---
 
@@ -120,7 +121,7 @@ surface) — see section 3.
   the required `unique(channel_id, user_id)` constraint. Carries `role`
   (`OWNER`/`MANAGER`/`MODERATOR`/`MEMBER`) and `status`
   (`ACTIVE`/`RESTRICTED`/`BLOCKED`) as separate columns, plus the ERD's
-  `media_allowed` flag. Indexed on `user_id`.
+  `media_allowed` flag (enforced in `sendMessage` and toggleable via `updateMediaPermission`
 - `channel_topics`: seeded with one default "معرفی" topic per new channel
   (matches the wireframe's `# معرفی` tag); unique on `(channel_id, name)`.
 
@@ -224,9 +225,8 @@ not just on their next send attempt. A topic never grants an exception to
 this: blocked is blocked, in every topic and in the no-topic bucket alike.
 
 ### US-13 — Delete channel
-Modeled as **REST**, not WS: `DELETE /api/channels/{id}` (`OWNER` or
-`MANAGER` — widened from `OWNER`-only in Sprint 9, see "5.4 ویرایش و حذف
-کانال و گروه"), because it's a one-off administrative action rather than a
+Modeled as **REST**, not WS: `DELETE /api/channels/{id}`, 
+because it's a one-off administrative action rather than a
 live multi-party event stream. It soft-deletes (`deleted_at`, message
 history is preserved for audit) and then broadcasts a `CHANNEL_DELETED`
 event to both `/topic/channels/{channelId}` and
@@ -427,18 +427,19 @@ are never broadcast to the whole channel/group.
 |---|---|---|
 | `/ws/connect` | connect | SockJS-wrapped STOMP endpoint (also registered without SockJS for native WS clients) |
 | `/app/channels.create` | client → server | US-09 |
-| `/app/channels.topics.create` | client → server | Create an additional channel topic (see Sprint 6) |
+| `/app/channels.topics.create` | client → server | Create an additional channel topic |
 | `/app/messages.send` | client → server | US-04 (payload includes optional `topicId`, `mediaId`, `scheduledAt`) |
-| `/app/messages.edit` | client → server | Edit a sent channel message - sender only (see Sprint 5) |
-| `/app/messages.delete` | client → server | Delete a sent channel message - sender or channel admin/moderator (see Sprint 5) |
+| `/app/messages.edit` | client → server | Edit a sent channel message - sender only |
+| `/app/messages.delete` | client → server | Delete a sent channel message - sender or channel admin/moderator |
 | `/app/channels.updateRole` | client → server | US-11 |
 | `/app/channels.blockMember` | client → server | US-12 |
+| `/app/channels.updateMediaPermission` | client → server |restrict/re-allow a member's ability to attach media, same MODERATOR+ rule as blockMember |
 | `/app/groups.messages.send` | client → server | Group-equivalent of `messages.send` (payload includes optional `mediaId`, `scheduledAt` - no `topicId`, groups have no topics) |
 | `/app/groups.messages.edit` | client → server | Group-equivalent of `messages.edit` - sender only |
 | `/app/groups.messages.delete` | client → server | Group-equivalent of `messages.delete` - sender or group ADMIN |
 | `/topic/channels/{channelId}` | server → clients | `MESSAGE_NEW`/`MESSAGE_UPDATED`/`MESSAGE_DELETED` (all messages, any topic or none), `CHANNEL_DELETED` |
 | `/topic/channels/{channelId}/topics/{topicId}` | server → clients | `MESSAGE_NEW`/`MESSAGE_UPDATED`/`MESSAGE_DELETED`, filtered to one topic — sent *in addition to* the channel-wide stream above whenever a message carries that `topicId` |
-| `/topic/channels/{channelId}/members` | server → clients | `MEMBER_ROLE_UPDATED`, `MEMBER_STATUS_UPDATED`, `CHANNEL_DELETED`, `TOPIC_CREATED` |
+| `/topic/channels/{channelId}/members` | server → clients | `MEMBER_ROLE_UPDATED`, `MEMBER_STATUS_UPDATED`, `MEMBER_MEDIA_PERMISSION_UPDATED`, `CHANNEL_DELETED`, `TOPIC_CREATED` |
 | `/topic/groups/{groupId}` | server → clients | `MESSAGE_NEW`/`MESSAGE_UPDATED`/`MESSAGE_DELETED` for that group |
 | `/topic/groups/{groupId}/members` | server → clients | `GROUP_MEMBER_JOINED` (on invite-accept or direct-add) |
 | `/user/queue/channels` | server → creator only | `CHANNEL_CREATED` reply to `channels.create` |
@@ -471,7 +472,7 @@ messages. `MessageResponse.status` is `PENDING` until
 | GET | `/api/channels/{id}/messages?before=&limit=&topicId=` | paginated history (US-05, initial load); `topicId` omitted = unfiltered, a topic's UUID = that topic only, `none` = no-topic messages only |
 | GET | `/api/channels/{id}/messages/search?q=&before=&limit=` | "6.4 جستجوی پیام‌ها" - case-insensitive substring search over this channel's message content, `q` required; not topic-scoped |
 | PATCH | `/api/channels/{id}` | "5.4 ویرایش و حذف کانال و گروه" - edit `name`/`description`, `OWNER` or `MANAGER` |
-| DELETE | `/api/channels/{id}` | US-13, `OWNER` or `MANAGER` (widened in Sprint 9, was `OWNER`-only) |
+| DELETE | `/api/channels/{id}` | US-13, `OWNER` or `MANAGER` |
 | POST | `/api/groups` | create a group (creator becomes `ADMIN`) |
 | GET | `/api/groups` | groups the caller belongs to |
 | GET | `/api/groups/{id}` | full detail: members |
@@ -639,8 +640,7 @@ media-service (`8083`) — see `vite.config.ts`. Set `VITE_API_BASE_URL` /
 - **Ownership transfer**: intentionally out of scope — `updateRole`
   explicitly rejects any attempt to change the `OWNER`'s role or promote a
   new one, so every channel always has exactly one, immutable owner for now.
-- **Topic management**: creating a topic is now supported (see Sprint 6 above,
-  `POST`-equivalent WS action `/app/channels.topics.create`); renaming or
+- **Topic management**: creating a topic is now supported; renaming or
   deleting an existing topic is still not exposed — a natural next slice,
   and the schema/mapper/validation are already shaped for it the same way
   creation was before this sprint.

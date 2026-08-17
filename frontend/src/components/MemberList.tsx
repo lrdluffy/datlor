@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { ChannelMemberResponse } from '../types/channel';
+import { Avatar } from './Avatar';
 
 interface MemberListProps {
     members: ChannelMemberResponse[];
@@ -18,7 +19,7 @@ const ROLE_LABEL_FA: Record<ChannelMemberResponse['role'], string> = {
     MEMBER: 'عضو',
 };
 
-/** "10.4 مشاهده و مدیریت نمایه کاربری": each row links to that member's profile (view-only entry point). */
+/** each row links to that member's profile (view-only entry point). */
 export function MemberList({ members }: MemberListProps) {
     return (
         <aside className="w-48 border-l border-line bg-white flex flex-col">
@@ -33,6 +34,7 @@ export function MemberList({ members }: MemberListProps) {
                             className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 transition-colors"
                         >
                             <span className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_DOT_COLOR[member.status]}`} />
+                            <Avatar userId={member.userId} size="xs" />
                             <span className="truncate flex-1 text-ink/80">{member.userId.slice(0, 8)}</span>
                             <span className="text-[10px] text-ink/40">{ROLE_LABEL_FA[member.role]}</span>
                         </Link>

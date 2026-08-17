@@ -57,6 +57,8 @@ interface UseChannelSessionResult {
   myScheduledMessages: MessageResponse[];
   updateRole: (targetUserId: string, newRole: ChannelRole) => void;
   updateMemberStatus: (targetUserId: string, newStatus: 'ACTIVE' | 'RESTRICTED' | 'BLOCKED') => void;
+  /** MODERATOR+ only, enforced server-side too. */
+  updateMediaPermission: (targetUserId: string, mediaAllowed: boolean) => void;
   /** "4.4 Create Channel": any member with access (ACTIVE status) may add a topic - enforced server-side too. */
   createTopic: (name: string) => void;
 }
@@ -401,6 +403,14 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
       [channelId]
   );
 
+  const updateMediaPermission = useCallback(
+      (targetUserId: string, mediaAllowed: boolean) => {
+        if (!channelId) return;
+        socketService.updateMediaPermission({ channelId, targetUserId, mediaAllowed });
+      },
+      [channelId]
+  );
+
   const createTopic = useCallback(
       (name: string) => {
         if (!channelId) return;
@@ -428,6 +438,7 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
     myScheduledMessages,
     updateRole,
     updateMemberStatus,
+    updateMediaPermission,
     createTopic,
   };
 }

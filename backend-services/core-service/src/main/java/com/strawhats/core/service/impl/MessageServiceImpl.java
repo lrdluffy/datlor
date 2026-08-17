@@ -11,6 +11,7 @@ import com.strawhats.core.entity.enums.ChannelRole;
 import com.strawhats.core.entity.enums.ChatType;
 import com.strawhats.core.exception.InvalidTopicException;
 import com.strawhats.core.exception.ResourceNotFoundException;
+import com.strawhats.core.exception.UnauthorizedActionException;
 import com.strawhats.core.mapper.MessageMapper;
 import com.strawhats.core.repository.ChannelRepository;
 import com.strawhats.core.repository.ChannelTopicRepository;
@@ -64,6 +65,16 @@ public class MessageServiceImpl implements MessageService {
         // message is topic-tagged, general, immediate, or scheduled.
         membershipService.requireCanSend(sender);
 
+        // a channel admin/moderator may have restricted
+        // this specific member's media_allowed flag (see
+        // MembershipService.updateMediaPermission) - only applies when the
+        // message actually attaches media; a plain TEXT message is
+        // unaffected even for a media-restricted member.
+        if (request.mediaId() != null && !sender.isMediaAllowed()) {
+            throw new UnauthorizedActionException(
+                    "Sending media has been restricted for you in this channel by an admin");
+        }
+
         ChannelTopic topic = resolveTopic(channel, request.topicId());
 
         return messagePersistenceHelper.persist(
@@ -104,7 +115,6 @@ public class MessageServiceImpl implements MessageService {
         return messagePersistenceHelper.deleteMessage(
                 ChatType.CHANNEL, channel.getId(), request.messageId(), actingUserId, canModerate);
     }
-
 
     @Override
     @Transactional(readOnly = true)

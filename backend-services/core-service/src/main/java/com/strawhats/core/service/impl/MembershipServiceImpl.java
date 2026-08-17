@@ -134,4 +134,27 @@ public class MembershipServiceImpl implements MembershipService {
         target.setStatus(newStatus);
         return channelMemberRepository.save(target);
     }
+
+    @Override
+    @Transactional
+    public ChannelMember updateMediaPermission(UUID channelId, UUID actorUserId, UUID targetUserId, boolean mediaAllowed) {
+        if (actorUserId.equals(targetUserId)) {
+            throw new UnauthorizedActionException("You cannot change your own media permission");
+        }
+
+        ChannelMember actor = requireMembership(channelId, actorUserId);
+        ChannelMember target = requireMembership(channelId, targetUserId);
+
+        if (!actor.getRole().isAtLeast(ChannelRole.MODERATOR)) {
+            throw new UnauthorizedActionException("Only MODERATOR, MANAGER, or OWNER may change a member's media permission");
+        }
+
+        if (!actor.getRole().outranks(target.getRole())) {
+            throw new UnauthorizedActionException(
+                    "Your role (" + actor.getRole() + ") does not outrank the target member's role (" + target.getRole() + ")");
+        }
+
+        target.setMediaAllowed(mediaAllowed);
+        return channelMemberRepository.save(target);
+    }
 }

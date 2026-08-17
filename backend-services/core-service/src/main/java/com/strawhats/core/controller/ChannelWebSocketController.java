@@ -1,6 +1,13 @@
 package com.strawhats.core.controller;
 
-import com.strawhats.core.dto.request.*;
+import com.strawhats.core.dto.request.CreateChannelRequest;
+import com.strawhats.core.dto.request.CreateTopicRequest;
+import com.strawhats.core.dto.request.DeleteMessageRequest;
+import com.strawhats.core.dto.request.EditMessageRequest;
+import com.strawhats.core.dto.request.SendMessageRequest;
+import com.strawhats.core.dto.request.UpdateMediaPermissionRequest;
+import com.strawhats.core.dto.request.UpdateMemberStatusRequest;
+import com.strawhats.core.dto.request.UpdateRoleRequest;
 import com.strawhats.core.dto.response.ChannelMemberResponse;
 import com.strawhats.core.dto.response.ChannelResponse;
 import com.strawhats.core.dto.response.ChannelTopicResponse;
@@ -56,10 +63,10 @@ public class ChannelWebSocketController {
     private final SimpMessagingTemplate messagingTemplate;
 
     public ChannelWebSocketController(ChannelService channelService,
-                                       MessageService messageService,
-                                       MembershipService membershipService,
-                                       ChannelMapper channelMapper,
-                                       SimpMessagingTemplate messagingTemplate) {
+                                      MessageService messageService,
+                                      MembershipService membershipService,
+                                      ChannelMapper channelMapper,
+                                      SimpMessagingTemplate messagingTemplate) {
         this.channelService = channelService;
         this.messageService = messageService;
         this.membershipService = membershipService;
@@ -193,6 +200,21 @@ public class ChannelWebSocketController {
 
         ChannelMemberResponse response = channelMapper.toMemberResponse(updated);
         WsEvent<ChannelMemberResponse> event = WsEvent.of(WsEventType.MEMBER_STATUS_UPDATED, response);
+        messagingTemplate.convertAndSend("/topic/channels/" + request.channelId() + "/members", event);
+    }
+
+    /**
+     * restrict/re-allow a specific member's ability to
+     * attach media - see MembershipService.updateMediaPermission for the
+     * exact authorization rule (MODERATOR and above, same as blockMember).
+     */
+    @MessageMapping("/channels.updateMediaPermission")
+    public void updateMediaPermission(@Valid @Payload UpdateMediaPermissionRequest request, Principal principal) {
+        ChannelMember updated = membershipService.updateMediaPermission(
+                request.channelId(), userId(principal), request.targetUserId(), request.mediaAllowed());
+
+        ChannelMemberResponse response = channelMapper.toMemberResponse(updated);
+        WsEvent<ChannelMemberResponse> event = WsEvent.of(WsEventType.MEMBER_MEDIA_PERMISSION_UPDATED, response);
         messagingTemplate.convertAndSend("/topic/channels/" + request.channelId() + "/members", event);
     }
 

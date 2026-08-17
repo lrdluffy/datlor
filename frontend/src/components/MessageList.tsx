@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Pencil, Trash2, X } from 'lucide-react';
 import { ChannelTopicResponse } from '../types/channel';
 import { MessageResponse } from '../types/message';
+import { Avatar } from './Avatar';
+import { MediaAttachment } from './MediaAttachment';
 
 interface MessageListProps {
   messages: MessageResponse[];
@@ -105,7 +107,12 @@ export function MessageList({
           const isEditing = editingId === message.id;
 
           return (
-              <div key={message.id} className={`group flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
+              <div key={message.id} className={`group flex items-end ${isOwn ? 'justify-end' : 'justify-start'}`}>
+                {!isOwn && (
+                    <div className="mr-2 mb-1 flex-shrink-0">
+                      <Avatar userId={message.senderId} size="xs" />
+                    </div>
+                )}
                 {isOwn && (canEdit || canDelete) && !isEditing && (
                     <div className="flex items-center gap-1 self-center opacity-0 group-hover:opacity-100 transition-opacity ml-1">
                       {canEdit && (
@@ -175,11 +182,11 @@ export function MessageList({
                   ) : (
                       <>
                         {message.type === 'TEXT' && <p className="whitespace-pre-wrap break-words">{message.content}</p>}
-                        {message.type !== 'TEXT' && (
-                            <p className="italic opacity-80">
-                              [{message.type === 'IMAGE' ? 'تصویر' : message.type === 'FILE' ? 'فایل' : 'پیام سیستمی'}]
-                            </p>
+                        {/* actually render what was sent, not a bracketed label. */}
+                        {(message.type === 'IMAGE' || message.type === 'FILE') && message.mediaId && (
+                            <MediaAttachment mediaId={message.mediaId} type={message.type} isOwn={isOwn} />
                         )}
+                        {message.type === 'SYSTEM' && <p className="italic opacity-80">[پیام سیستمی]</p>}
                         <div className={`text-[10px] mt-1 ${isOwn ? 'text-white/70' : 'text-ink/40'}`}>
                           {formatTime(message.createdAt)}
                           {message.edited && ' · ویرایش شده'}

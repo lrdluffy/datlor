@@ -9,6 +9,7 @@ import { MessageList } from '../components/MessageList';
 import { MessageInput } from '../components/MessageInput';
 import { MessageSearchBar } from '../components/MessageSearchBar';
 import { MessageSearchResults } from '../components/MessageSearchResults';
+import { Avatar } from '../components/Avatar';
 
 export function GroupViewPage() {
   const { groupId } = useParams<{ groupId: string }>();
@@ -214,6 +215,7 @@ export function GroupViewPage() {
                         }`}
                     />
                   </span>
+                      <Avatar userId={member.userId} size="xs" />
                       <span className="truncate flex-1 text-ink/80">{member.userId.slice(0, 8)}</span>
                       <span
                           className={`text-[10px] rounded-full px-1.5 py-0.5 flex-shrink-0 ${

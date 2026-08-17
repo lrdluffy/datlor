@@ -11,6 +11,7 @@ import {
   GroupTopicEvent,
   MembersTopicEvent,
   MessageScheduledEvent,
+  UpdateMediaPermissionRequest,
   UpdateMemberStatusRequest,
   UpdateRoleRequest,
   WsErrorMessage,
@@ -197,6 +198,11 @@ class SocketService {
   /** US-12: Block/restrict a channel member (newStatus=ACTIVE lifts it). */
   updateMemberStatus(payload: UpdateMemberStatusRequest): void {
     this.publish('/app/channels.blockMember', payload);
+  }
+
+  /** restrict/re-allow a member's ability to attach media. */
+  updateMediaPermission(payload: UpdateMediaPermissionRequest): void {
+    this.publish('/app/channels.updateMediaPermission', payload);
   }
 
   // ---------------------------------------------------------------

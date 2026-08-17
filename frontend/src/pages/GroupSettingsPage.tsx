@@ -4,6 +4,7 @@ import { X, Settings, Users, Pencil, Trash2, Loader2, AlertCircle, CheckCircle2 
 import { useAuth } from '../context/AuthContext';
 import { useGroupSession } from '../hooks/useGroupSession';
 import { groupApi } from '../api/groupApi';
+import { Avatar } from '../components/Avatar';
 
 /**
  * the group-equivalent of
@@ -207,6 +208,7 @@ export function GroupSettingsPage() {
                                     className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50 transition-colors"
                                 >
                                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${member.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-ink/20'}`} />
+                                    <Avatar userId={member.userId} size="xs" />
                                     <span className="truncate flex-1 text-ink/80">{member.userId.slice(0, 8)}</span>
                                     <span
                                         className={`text-[10px] rounded-full px-1.5 py-0.5 flex-shrink-0 ${
