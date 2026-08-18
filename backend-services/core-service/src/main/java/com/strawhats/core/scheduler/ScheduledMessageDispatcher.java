@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -50,8 +51,11 @@ public class ScheduledMessageDispatcher {
     @Scheduled(fixedDelayString = "${scheduling.dispatcher.fixed-delay-ms}")
     @Transactional
     public void dispatchDueMessages() {
+        // Use UTC time instead of server local time
+        LocalDateTime nowUtc = LocalDateTime.now(ZoneOffset.UTC);
+
         List<Message> due = messageRepository.findDueScheduledMessages(
-                LocalDateTime.now(), PageRequest.of(0, schedulingProperties.batchSize()));
+                nowUtc, PageRequest.of(0, schedulingProperties.batchSize()));
 
         for (Message message : due) {
             message.setStatus(MessageStatus.SENT);

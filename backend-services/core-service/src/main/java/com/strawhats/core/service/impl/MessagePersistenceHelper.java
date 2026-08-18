@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
 
@@ -64,7 +65,7 @@ public class MessagePersistenceHelper {
 
         // US-19: a future scheduledAt defers delivery; anything else (null,
         // now, or the past) is treated as "send immediately".
-        boolean isScheduled = scheduledAt != null && scheduledAt.isAfter(LocalDateTime.now());
+        boolean isScheduled = scheduledAt != null && scheduledAt.isAfter(LocalDateTime.now(ZoneOffset.UTC));
 
         Message message = Message.builder()
                 .chatType(chatType)
