@@ -25,8 +25,17 @@ import java.util.UUID;
 @Builder
 public class MediaFile {
 
+    // Deliberately NOT @GeneratedValue: MediaFileServiceImpl assigns the id
+    // itself (UUID.randomUUID()) *before* persisting, because the same UUID
+    // must name both this DB row and the on-disk blob (see
+    // LocalStorageServiceImpl). Hibernate's default UUID generator ignores
+    // any id you set on the entity and silently overwrites it with its own
+    // freshly-generated UUID at insert time - that desync is exactly what
+    // caused downloads to 404 (the id returned to the client didn't match
+    // the file actually written to disk). Leaving this as a plain assigned
+    // identifier makes Hibernate persist the value we set, keeping DB and
+    // disk in sync.
     @Id
-    @GeneratedValue
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
