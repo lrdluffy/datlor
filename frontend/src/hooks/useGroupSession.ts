@@ -79,7 +79,14 @@ export function useGroupSession(groupId: string | undefined): UseGroupSessionRes
 
     const unsubGroup = socketService.subscribeToGroup(groupId, (event: GroupTopicEvent) => {
       if (event.type === 'MESSAGE_NEW') {
-        setMessages((prev) => [...prev, event.payload as MessageResponse]);
+        const message = event.payload as MessageResponse;
+        setMessages((prev) => [...prev, message]);
+        // US-19: this MESSAGE_NEW may be ScheduledMessageDispatcher firing a
+        // message that previously only existed in myScheduledMessages (as a
+        // private MESSAGE_SCHEDULED ack) - drop it from that pending list
+        // now that it's actually been sent, or the "N scheduled" banner
+        // would keep counting messages that already went out.
+        setMyScheduledMessages((prev) => prev.filter((m) => m.id !== message.id));
       } else if (event.type === 'MESSAGE_UPDATED') {
         const message = event.payload as MessageResponse;
         setMessages((prev) => prev.map((m) => (m.id === message.id ? message : m)));

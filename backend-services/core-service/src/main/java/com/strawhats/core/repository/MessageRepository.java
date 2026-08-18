@@ -23,6 +23,15 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * Excludes soft-deleted messages (`deletedAt is null`), mirroring
      * ChannelRepository.findActiveById - a deleted message's row is kept
      * for audit, but never resurfaces in a history read.
+     * Excludes still-PENDING scheduled messages (US-19) too: `createdAt`
+     * is stamped at creation time, not at send time, so a scheduled
+     * message otherwise qualifies for a history page well before it's
+     * actually due - which would leak its content to every member, not
+     * just its sender, ahead of schedule. ScheduledMessageDispatcher is
+     * the only thing allowed to make a PENDING message visible, by
+     * flipping it to SENT; until then this must stay invisible here the
+     * same way it's already kept off the WS broadcast (see
+     * ChannelWebSocketController.sendMessage).
      */
     @Query("""
             select m from Message m
@@ -30,12 +39,13 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             where m.chatType = :chatType and m.chatId = :chatId
             and m.createdAt < :before
             and m.deletedAt is null
+            and m.status = 'SENT'
             order by m.createdAt desc
             """)
     List<Message> findHistoryPage(@Param("chatType") ChatType chatType,
-                                   @Param("chatId") UUID chatId,
-                                   @Param("before") LocalDateTime before,
-                                   Pageable pageable);
+                                  @Param("chatId") UUID chatId,
+                                  @Param("before") LocalDateTime before,
+                                  Pageable pageable);
 
     /**
      * Topic-aware cursor pagination: scoped to one specific topic (when
@@ -43,6 +53,8 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * (when `topicId` is null) - backs the frontend's per-topic filtered
      * view. Each topic (and the no-topic bucket) is paginated completely
      * independently of the unfiltered stream above and of every other topic.
+     * Excludes still-PENDING scheduled messages (US-19) - same reasoning
+     * as findHistoryPage above.
      */
     @Query("""
             select m from Message m
@@ -50,6 +62,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             where m.chatType = :chatType and m.chatId = :chatId
             and m.createdAt < :before
             and m.deletedAt is null
+            and m.status = 'SENT'
               and (
                 (:topicId is null and m.topic is null)
                 or (:topicId is not null and m.topic.id = :topicId)
@@ -57,10 +70,10 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             order by m.createdAt desc
             """)
     List<Message> findTopicHistoryPage(@Param("chatType") ChatType chatType,
-                                        @Param("chatId") UUID chatId,
-                                        @Param("topicId") UUID topicId,
-                                        @Param("before") LocalDateTime before,
-                                        Pageable pageable);
+                                       @Param("chatId") UUID chatId,
+                                       @Param("topicId") UUID topicId,
+                                       @Param("before") LocalDateTime before,
+                                       Pageable pageable);
 
     /**
      * Required finder (spec): all messages in a channel tagged to one
@@ -93,7 +106,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
     List<Message> findDueScheduledMessages(@Param("now") LocalDateTime now, Pageable pageable);
 
     /**
-     * "6.4 جستجوی پیام‌ها": filter a chat's messages down to ones whose
+     * filter a chat's messages down to ones whose
      * content contains `query`, case-insensitively - the query text may
      * appear anywhere in the message, matching the spec ("messages
      * containing the user's query text"). Same cursor-pagination shape as
@@ -106,6 +119,9 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
      * substring scan, mirroring ChannelRepository.searchActiveChannels
      * exactly (including that it does not escape literal `%`/`_` in
      * `query`, same as that method).
+     * Excludes still-PENDING scheduled messages (US-19) - same reasoning
+     * as findHistoryPage above: search must not surface a message's
+     * content before it's actually been sent.
      */
     @Query("""
             select m from Message m
@@ -113,6 +129,7 @@ public interface MessageRepository extends JpaRepository<Message, UUID> {
             where m.chatType = :chatType and m.chatId = :chatId
             and m.createdAt < :before
             and m.deletedAt is null
+            and m.status = 'SENT'
             and m.content is not null
             and lower(m.content) like lower(concat('%', :query, '%'))
             order by m.createdAt desc

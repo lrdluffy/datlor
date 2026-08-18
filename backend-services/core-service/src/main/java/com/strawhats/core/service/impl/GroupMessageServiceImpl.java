@@ -104,9 +104,16 @@ public class GroupMessageServiceImpl implements GroupMessageService {
         requireActiveMember(groupId, requestingUserId);
 
         int pageSize = Math.min(Math.max(limit, 1), MAX_HISTORY_PAGE_SIZE);
+        // A null `before` means "the first page" (no cursor loaded yet) and
+        // must default to now, mirroring MessageServiceImpl.getHistory
+        // (channels): findHistoryPage's `createdAt < :before` compares
+        // against SQL NULL otherwise, which is never true for any row, so
+        // the very first history load for a group would silently come back
+        // empty instead of the newest page.
+        LocalDateTime effectiveBefore = before != null ? before : LocalDateTime.now();
 
         return messageRepository
-                .findHistoryPage(ChatType.GROUP, groupId, before, PageRequest.of(0, pageSize))
+                .findHistoryPage(ChatType.GROUP, groupId, effectiveBefore, PageRequest.of(0, pageSize))
                 .stream()
                 .map(messageMapper::toResponse)
                 .toList();

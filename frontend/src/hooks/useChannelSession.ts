@@ -218,6 +218,12 @@ export function useChannelSession(channelId: string | undefined): UseChannelSess
         const message = event.payload as MessageResponse;
         appendIfInitialized(ALL_BUCKET_KEY, message);
         appendIfInitialized(message.topicId ?? GENERAL_BUCKET_KEY, message);
+        // US-19: this MESSAGE_NEW may be ScheduledMessageDispatcher firing a
+        // message that previously only existed in myScheduledMessages (as a
+        // private MESSAGE_SCHEDULED ack) - drop it from that pending list
+        // now that it's actually been sent, or the "N scheduled" banner
+        // would keep counting messages that already went out.
+        setMyScheduledMessages((prev) => prev.filter((m) => m.id !== message.id));
       } else if (event.type === 'MESSAGE_UPDATED') {
         const message = event.payload as MessageResponse;
         replaceIfPresent(ALL_BUCKET_KEY, message);
