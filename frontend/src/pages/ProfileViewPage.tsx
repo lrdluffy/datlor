@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, User, Loader2, AlertCircle, Pencil } from 'lucide-react';
+import { ArrowLeft, User, Loader2, AlertCircle, Pencil, Copy } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { profileApi } from '../api/profileApi';
 import { mediaApi } from '../api/mediaApi';
@@ -20,6 +20,7 @@ export function ProfileViewPage() {
     const [profile, setProfile] = useState<PublicProfileResponse | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
 
     useEffect(() => {
         if (!userId) return;
@@ -33,6 +34,25 @@ export function ProfileViewPage() {
     }, [userId]);
 
     const isOwnProfile = !!user && user.id === userId;
+
+    const handleCopyUserId = async () => {
+        if (!profile) return;
+        try {
+            await navigator.clipboard.writeText(profile.userId);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch (err) {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = profile.userId;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }
+    };
 
     if (isLoading) {
         return (
@@ -55,8 +75,8 @@ export function ProfileViewPage() {
                     <ArrowLeft className="w-4 h-4" />
                 </Link>
                 <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-accent via-violet-600 to-fuchsia-600 flex items-center justify-center shadow-md shadow-accent/30">
-          <User className="w-4 h-4 text-white" />
-        </span>
+                    <User className="w-4 h-4 text-white" />
+                </span>
                 <h1 className="font-display font-semibold text-ink">نمایه کاربری</h1>
             </header>
 
@@ -100,10 +120,42 @@ export function ProfileViewPage() {
                             </div>
                         </div>
 
-                        <div className="mt-4 pt-4 border-t border-line">
-                            <h3 className="text-xs text-ink/50 mb-1">درباره</h3>
+                        {/* User ID section */}
+                        <div className="flex items-center gap-2 bg-gradient-to-r from-slate-50/80 to-white rounded-lg border border-slate-200/60 px-3 py-2.5 transition-all hover:border-accent/30 hover:shadow-sm group text-md font-semibold">
+                            <div className="flex-1 flex items-center gap-2 min-w-0">
+                                <div className="flex items-center gap-1.5 bg-accent/5 px-2 py-1 rounded-md border border-accent/10">
+                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-accent/40">ID</span>
+                                    <code className="text-sm font-mono text-ink/80 truncate select-all">
+                                        {profile.userId}
+                                    </code>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleCopyUserId}
+                                className={`flex-shrink-0 w-14 h-8 flex items-center justify-center rounded-md transition-all duration-200 hover:scale-105 active:scale-95 ${copied
+                                        ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                                        : 'text-ink/30 hover:text-accent hover:bg-accent/10'
+                                    }`}
+                                title="کپی کردن شناسه کاربری"
+                            >
+                                {copied ? (
+                                    <span className="text-xs font-medium whitespace-nowrap">کپی شد!</span>
+                                ) : (
+                                    <Copy className="w-4 h-4" />
+                                )}
+                            </button>
+                        </div>
+
+                        {/* Biography section */}
+                        <div className="mt-5 pt-4 border-t border-line">
+                            <div className="flex items-center gap-2 mb-2">
+                                <span className="text-xs font-medium text-ink/50">درباره</span>
+                                <span className="flex-1 h-px bg-line/50"></span>
+                            </div>
                             {profile.bio ? (
-                                <p className="text-sm text-ink whitespace-pre-wrap break-words">{profile.bio}</p>
+                                <p className="text-sm text-ink whitespace-pre-wrap break-words leading-relaxed">
+                                    {profile.bio}
+                                </p>
                             ) : (
                                 <p className="text-sm text-ink/30 italic">بیوگرافی ثبت نشده است</p>
                             )}
