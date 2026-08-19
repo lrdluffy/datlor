@@ -4,6 +4,7 @@ import com.strawhats.media.config.StorageProperties;
 import com.strawhats.media.exception.ResourceNotFoundException;
 import com.strawhats.media.exception.StorageException;
 import com.strawhats.media.service.StorageService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -20,11 +21,16 @@ import java.util.UUID;
  * Simulates an S3-like object store: each file is written to
  * `{media.storage.root}/{mediaId}` as a single opaque blob (the DB row
  * already tracks the original content-type/size, so no extension or
- * metadata sidecar is needed on disk). Swap this class for a real
- * S3/MinIO-backed StorageService in production; every caller goes through
- * the {@link StorageService} interface and would not need to change.
+ * metadata sidecar is needed on disk).
+ *
+ * <p>Active whenever {@code media.storage.use-minio} is {@code false} or
+ * unset (the default) - see {@code USE_MINIO} env var. Flip it to {@code true}
+ * to switch every caller (controller, MediaFileService) over to
+ * {@code MinioStorageServiceImpl} instead, with zero code changes required
+ * outside this pair of {@link StorageService} implementations.
  */
 @Service
+@ConditionalOnProperty(prefix = "media.storage", name = "use-minio", havingValue = "false", matchIfMissing = true)
 public class LocalStorageServiceImpl implements StorageService {
 
     private final StorageProperties storageProperties;

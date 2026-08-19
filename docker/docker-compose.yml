@@ -135,16 +135,50 @@ services:
       INTERNAL_API_KEY: change-me-in-production-to-a-long-random-secret
       MEDIA_STORAGE_ROOT: /data/media
       MEDIA_PUBLIC_BASE_URL: http://localhost:8083/api/media
+      # ---- Storage backend switch ----
+      # false (default): local-disk storage via the media_files_data volume
+      #   below. true: MinioStorageServiceImpl stores files in MinIO instead
+      #   (see the minio service) - the media_files_data volume then just
+      #   goes unused rather than needing to be removed.
+      USE_MINIO: "false"
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: datlor-media
+      MINIO_USE_SSL: "false"
     ports:
       - "8083:8083"
     volumes:
-      # Simulated object store (see LocalStorageServiceImpl) - a real
-      # deployment would swap this for an S3/MinIO-backed StorageService
-      # and drop this volume entirely.
+      # Simulated object store (see LocalStorageServiceImpl), only actually
+      # used while USE_MINIO=false above.
       - media_files_data:/data/media
+
+  # Real object store, used by MinioStorageServiceImpl when media-service's
+  # USE_MINIO=true. Left running either way so flipping the flag doesn't
+  # require restarting this service, just media-service.
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   identity_pg_data:
   core_pg_data:
   media_pg_data:
   media_files_data:
+  minio_data:

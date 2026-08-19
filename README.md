@@ -240,11 +240,14 @@ alongside it.
 ### Media schema (`media_files`) + US-18 — Attach media to a message
 `media-service` owns exactly one table, `media_files` (`id`, `uploader_id`,
 `file_url`, `file_type`, `size`, `created_at`), indexed on `uploader_id`.
-`StorageService` is a small interface with one implementation today,
-`LocalStorageServiceImpl`, which simulates an S3-like object store by
-writing each upload to `{media.storage.root}/{mediaId}` on local disk —
-swapping in a real S3/MinIO-backed implementation later touches only that
-one class. **File bytes never enter core-service's or identity-service's
+`StorageService` is a small interface with two interchangeable
+implementations, selected at startup by `USE_MINIO` (see "Object storage:
+local disk vs. MinIO" in section 7): `LocalStorageServiceImpl`, which
+simulates an S3-like object store by writing each upload to
+`{media.storage.root}/{mediaId}` on local disk, and `MinioStorageServiceImpl`,
+which writes the same `mediaId`-named object to a real MinIO bucket. Every
+other caller goes through the interface and doesn't know or care which one
+is active. **File bytes never enter core-service's or identity-service's
 database**, only a `mediaId` (UUID) ever crosses a service boundary.
 
 `POST /api/media` (multipart) uploads a file and returns its `MediaFileResponse`
@@ -525,10 +528,14 @@ docker compose up --build
 ```
 Starts `identity-postgres` (`5432`), `identity-service` (`8081`),
 `core-postgres` (`5433`), `core-service` (`8082`), `media-postgres`
-(`5434`), and `media-service` (`8083`). Flyway migrates all three services'
-schemas automatically on boot. `media-service`'s simulated storage
-(`LocalStorageServiceImpl`) persists to a named Docker volume
-(`media_files_data`) so uploads survive a container restart.
+(`5434`), `media-service` (`8083`), and `minio` (`9000` API / `9001`
+console). Flyway migrates all three services' schemas automatically on
+boot. By default `media-service` runs with `USE_MINIO=false`, so its
+simulated storage (`LocalStorageServiceImpl`) persists to a named Docker
+volume (`media_files_data`) so uploads survive a container restart. Set
+`USE_MINIO: "true"` on the `media-service` entry in `docker-compose.yml`
+to switch it over to the `minio` service instead (already running
+alongside it) — see "Object storage: local disk vs. MinIO" below.
 
 ### Backend only (local Postgres, run each service in its own shell)
 ```bash
@@ -557,6 +564,12 @@ export DB_HOST=localhost DB_PORT=5434 DB_USER=media_user DB_PASSWORD=media_pass 
 export JWT_SECRET=<same value as identity-service's>
 export INTERNAL_API_KEY=<same value as identity-service's>
 export MEDIA_STORAGE_ROOT=/tmp/datlor-media
+# Or, to use MinIO instead of local disk (run a local MinIO server first,
+# e.g. `docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address :9001`):
+#   export USE_MINIO=true
+#   export MINIO_ENDPOINT=localhost MINIO_PORT=9000
+#   export MINIO_ACCESS_KEY=minioadmin MINIO_SECRET_KEY=minioadmin
+#   export MINIO_BUCKET_NAME=datlor-media MINIO_USE_SSL=false
 mvn spring-boot:run
 ```
 
@@ -605,9 +618,40 @@ media-service (`8083`) — see `vite.config.ts`. Set `VITE_API_BASE_URL` /
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | `localhost` / `5432` / `media_db` / `media_user` / `media_pass` | Postgres connection (separate DB from identity-service/core-service) |
 | `JWT_SECRET` | dev-only placeholder | **Must exactly match** identity-service's/core-service's — this service only validates, never signs |
 | `INTERNAL_API_KEY` | dev-only placeholder | **Must exactly match** identity-service's and core-service's |
-| `MEDIA_STORAGE_ROOT` | `/tmp/datlor-media` | Where `LocalStorageServiceImpl` simulates object storage on disk |
-| `MEDIA_PUBLIC_BASE_URL` | `http://localhost:8083/api/media` | Base URL embedded in `MediaFile.fileUrl` |
+| `MEDIA_PUBLIC_BASE_URL` | `http://localhost:8083/api/media` | Base URL embedded in `MediaFile.fileUrl` (same shape either way — see below) |
 | `MEDIA_MAX_FILE_SIZE_BYTES` | `26214400` (25 MB) | Upload size cap |
+| `USE_MINIO` | `false` | `false` → `LocalStorageServiceImpl` (disk). `true` → `MinioStorageServiceImpl` (object storage) |
+| `MEDIA_STORAGE_ROOT` | `/tmp/datlor-media` | Where `LocalStorageServiceImpl` simulates object storage on disk — only read when `USE_MINIO=false` |
+| `MINIO_ENDPOINT` | `localhost` | MinIO server hostname — only read when `USE_MINIO=true` |
+| `MINIO_PORT` | `9000` | MinIO server port |
+| `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
+| `MINIO_SECRET_KEY` | `minioadmin` | MinIO secret key |
+| `MINIO_BUCKET_NAME` | `datlor-media` | Bucket to store/retrieve files in — auto-created at startup if missing |
+| `MINIO_USE_SSL` | `false` | Whether to connect to MinIO over HTTPS |
+
+### Object storage: local disk vs. MinIO
+
+`media-service` stores every uploaded file's bytes behind one interface,
+`StorageService` (`store` / `load` / `delete` / `publicUrlFor`), with two
+interchangeable implementations selected by `USE_MINIO` at startup —
+neither the controller, `MediaFileService`, core-service, nor the frontend
+know or care which one is active:
+
+- **`LocalStorageServiceImpl`** (`USE_MINIO=false`, the default) — simulates
+  an object store on local disk under `MEDIA_STORAGE_ROOT`, one file per
+  `mediaId`.
+- **`MinioStorageServiceImpl`** (`USE_MINIO=true`) — stores the same
+  `mediaId`-named objects in a real MinIO bucket (`MINIO_BUCKET_NAME`,
+  created automatically on boot if it doesn't already exist).
+
+Both implementations return the same kind of URL from `publicUrlFor` — a
+`MEDIA_PUBLIC_BASE_URL`-rooted link to `MediaController`'s own
+`GET /api/media/{mediaId}/content` endpoint, which streams the bytes from
+whichever backend is active. Callers, `MediaFile.fileUrl`, and the
+frontend's `<img>`/`<video>`/download links are therefore identical either
+way; switching backends only ever requires restarting `media-service`
+with a different `USE_MINIO` value (and the matching `MINIO_*` variables),
+never a code or schema change.
 
 ---
 
